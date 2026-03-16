@@ -6,12 +6,14 @@ HAND_CSV = r"C:\dev\walk\pose_output\hand_motion_summary.csv"
 LEG_CSV = r"C:\dev\walk\pose_output\leg_fidget_summary.csv"
 POSTURE_CSV = r"C:\dev\walk\pose_output\posture_sway_summary.csv"
 HAND_REP_CSV = r"C:\dev\walk\pose_output\hand_repetition_summary.csv"
+LEG_REP_CSV = r"C:\dev\walk\pose_output\leg_repetition_summary.csv"
 OUTPUT_JSON = r"C:\dev\walk\pose_output\micro_behavior_snapshot.json"
 
 hand_map = {}
 leg_map = {}
 posture_map = {}
 hand_rep_map = {}
+leg_rep_map = {}
 
 with open(HAND_CSV, "r", encoding="utf-8-sig") as f:
     reader = csv.DictReader(f)
@@ -49,8 +51,21 @@ with open(HAND_REP_CSV, "r", encoding="utf-8-sig") as f:
             "hand_repetition_level": row["hand_repetition_level"]
         }
 
+with open(LEG_REP_CSV, "r", encoding="utf-8-sig") as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+        track_id = row["track_id"]
+        leg_rep_map[track_id] = {
+            "leg_repetition_score": float(row["leg_repetition_score"]),
+            "leg_repetition_level": row["leg_repetition_level"]
+        }
+
 all_track_ids = sorted(
-    set(hand_map.keys()) | set(leg_map.keys()) | set(posture_map.keys()) | set(hand_rep_map.keys()),
+    set(hand_map.keys())
+    | set(leg_map.keys())
+    | set(posture_map.keys())
+    | set(hand_rep_map.keys())
+    | set(leg_rep_map.keys()),
     key=int
 )
 
@@ -60,6 +75,7 @@ for track_id in all_track_ids:
     leg = leg_map.get(track_id, {"leg_fidget_score": 0.0, "leg_fidget_level": "LOW"})
     posture = posture_map.get(track_id, {"posture_sway_score": 0.0, "posture_sway_level": "LOW"})
     hand_rep = hand_rep_map.get(track_id, {"hand_repetition_score": 0.0, "hand_repetition_level": "LOW"})
+    leg_rep = leg_rep_map.get(track_id, {"leg_repetition_score": 0.0, "leg_repetition_level": "LOW"})
 
     micro_score = round(
         (
@@ -67,7 +83,8 @@ for track_id in all_track_ids:
             + leg["leg_fidget_score"]
             + posture["posture_sway_score"]
             + hand_rep["hand_repetition_score"]
-        ) / 4,
+            + leg_rep["leg_repetition_score"]
+        ) / 5,
         2
     )
 
@@ -88,6 +105,8 @@ for track_id in all_track_ids:
         "posture_sway_level": posture["posture_sway_level"],
         "hand_repetition_score": hand_rep["hand_repetition_score"],
         "hand_repetition_level": hand_rep["hand_repetition_level"],
+        "leg_repetition_score": leg_rep["leg_repetition_score"],
+        "leg_repetition_level": leg_rep["leg_repetition_level"],
         "micro_behavior_score": micro_score,
         "micro_behavior_level": micro_level
     })

@@ -16,6 +16,7 @@ for track in tracks:
     leg_score = float(track["leg_fidget_score"])
     posture_score = float(track["posture_sway_score"])
     hand_rep_score = float(track.get("hand_repetition_score", 0.0))
+    leg_rep_score = float(track.get("leg_repetition_score", 0.0))
     micro_score = float(track["micro_behavior_score"])
 
     state = "STABLE"
@@ -23,11 +24,23 @@ for track in tracks:
     message = "Micro motion is low and stable."
     next_action = "CONTINUE_MONITORING"
 
-    if hand_rep_score >= 40:
+    if hand_rep_score >= 40 and leg_rep_score >= 40:
+        state = "MULTI_REPETITIVE_SIGNAL"
+        reason_code = "HIGH_HAND_AND_LEG_REPETITION"
+        message = "Repeated hand and leg micro-motion detected."
+        next_action = "CHECK_MULTI_REPETITION"
+
+    elif hand_rep_score >= 40:
         state = "REPETITIVE_HAND_SIGNAL"
         reason_code = "HIGH_HAND_REPETITION"
         message = "Repeated hand micro-motion detected."
         next_action = "CHECK_HAND_PATTERN"
+
+    elif leg_rep_score >= 40:
+        state = "REPETITIVE_LEG_SIGNAL"
+        reason_code = "HIGH_LEG_REPETITION"
+        message = "Repeated leg micro-motion detected."
+        next_action = "CHECK_LEG_PATTERN"
 
     elif micro_score >= 30:
         state = "HIGH_MICRO_MOTION"
@@ -41,12 +54,7 @@ for track in tracks:
         message = "Moderate restless micro-motion detected."
         next_action = "OBSERVE_LONGER"
 
-    if leg_score >= 25 and hand_score < 10:
-        reason_code = "LEG_DOMINANT_MOTION"
-        message = "Leg motion is dominant."
-        next_action = "CHECK_LEG_FIDGET"
-
-    elif posture_score >= 20:
+    if posture_score >= 20 and state not in ("MULTI_REPETITIVE_SIGNAL",):
         reason_code = "HIGH_POSTURE_SWAY"
         message = "Posture sway is elevated."
         next_action = "CHECK_BODY_STABILITY"
@@ -57,6 +65,7 @@ for track in tracks:
         "leg_fidget_score": leg_score,
         "posture_sway_score": posture_score,
         "hand_repetition_score": hand_rep_score,
+        "leg_repetition_score": leg_rep_score,
         "micro_behavior_score": micro_score,
         "judgment": {
             "state": state,
