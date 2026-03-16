@@ -1,0 +1,25 @@
+# generated outputs
+artifacts/
+logs/
+trash/
+cookies/
+archive/
+
+# temp / local
+*.log
+*.tmp
+tmp*.json
+.cookie.txt
+cookie.txt
+cookie.day10.txt
+
+# generated result json
+coach.after*.json
+coach.before*.json
+
+# local binaries
+app.jar
+
+# misc
+Thumbs.db
+새 텍스트 문서.txt

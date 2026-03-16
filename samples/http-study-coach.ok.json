@@ -1,0 +1,28 @@
+{
+  "success": true,
+  "message": "OK",
+  "data": {
+    "state": {
+      "ymd": "2026-02-05",
+      "studiedToday": false,
+      "streakDays": 0,
+      "eventsCount": 0,
+      "quizSubmits": 0,
+      "wrongReviews": 0,
+      "lastEventAt": null,
+      "recentKnowledgeId": null
+    },
+    "nextAction": {
+      "type": "JUST_OPEN",
+      "label": "오늘은 가볍게 1개만 시작할까?",
+      "knowledgeId": null,
+      "requiresForge": false,
+      "reason": "오늘의 첫 진입이야. 1분만 열어도 학습 루프가 시작돼."
+    },
+    "prediction": {
+      "level": "UNCERTAIN",
+      "horizon": "SHORT",
+      "basis": "rule=baseline"
+    }
+  }
+}

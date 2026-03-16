@@ -1,0 +1,12 @@
+[
+  { "user": "u101", "persona": "stable",  "d": ["event","event","event","event","event","event","event"] },
+  { "user": "u102", "persona": "light",   "d": ["event","none","event","none","event","none","event"] },
+  { "user": "u103", "persona": "burnout", "d": ["event3","event3","none","none","none","event","none"] },
+  { "user": "u104", "persona": "drop",    "d": ["none","none","none","none","none","event","none"] },
+  { "user": "u105", "persona": "return",  "d": ["none","none","event","event","event","event","event"] },
+  { "user": "u106", "persona": "weekend", "d": ["none","none","none","none","none","event3","event2"] },
+  { "user": "u107", "persona": "noise",   "d": ["none","event","none","event2","none","none","event"] },
+  { "user": "u108", "persona": "over",    "d": ["event5","event4","event3","none","none","none","none"] },
+  { "user": "u109", "persona": "slow",    "d": ["none","event","event","none","event","event","event"] },
+  { "user": "u110", "persona": "min",     "d": ["event","none","none","none","none","none","none"] }
+]

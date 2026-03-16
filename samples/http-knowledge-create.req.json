@@ -1,0 +1,8 @@
+{
+  "type": "qa",
+  "title": "회귀용 지식(자동생성)",
+  "content": "Q: ... A: ...",
+  "source": "manual",
+  "tags": ["regression"]
+}
+
