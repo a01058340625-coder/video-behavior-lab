@@ -1,0 +1,18 @@
+# python
+__pycache__/
+*.pyc
+
+# video
+*.mp4
+*.avi
+
+# outputs
+output/
+pose_output/
+
+# model weights
+*.pt
+
+# system
+.DS_Store
+Thumbs.db
