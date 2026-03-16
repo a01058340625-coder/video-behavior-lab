@@ -8,13 +8,14 @@ with open(INPUT_JSON, "r", encoding="utf-8-sig") as f:
     snapshot = json.load(f)
 
 tracks = snapshot.get("tracks", [])
-
 results = []
 
 for track in tracks:
     track_id = track["track_id"]
     hand_score = float(track["hand_motion_score"])
     leg_score = float(track["leg_fidget_score"])
+    posture_score = float(track["posture_sway_score"])
+    hand_rep_score = float(track.get("hand_repetition_score", 0.0))
     micro_score = float(track["micro_behavior_score"])
 
     state = "STABLE"
@@ -22,32 +23,40 @@ for track in tracks:
     message = "Micro motion is low and stable."
     next_action = "CONTINUE_MONITORING"
 
-    if micro_score >= 25:
+    if hand_rep_score >= 40:
+        state = "REPETITIVE_HAND_SIGNAL"
+        reason_code = "HIGH_HAND_REPETITION"
+        message = "Repeated hand micro-motion detected."
+        next_action = "CHECK_HAND_PATTERN"
+
+    elif micro_score >= 30:
         state = "HIGH_MICRO_MOTION"
         reason_code = "STRONG_RESTLESS_SIGNAL"
         message = "Strong micro-motion signal detected."
         next_action = "CHECK_RESTLESS_PATTERN"
 
-    elif micro_score >= 10:
+    elif micro_score >= 12:
         state = "RESTLESS"
         reason_code = "MEDIUM_MICRO_MOTION"
         message = "Moderate restless micro-motion detected."
         next_action = "OBSERVE_LONGER"
 
-    if hand_score >= 25 and leg_score < 10:
-        reason_code = "HAND_DOMINANT_MOTION"
-        message = "Hand motion is dominant."
-        next_action = "CHECK_HAND_REPETITION"
-
-    elif leg_score >= 25 and hand_score < 10:
+    if leg_score >= 25 and hand_score < 10:
         reason_code = "LEG_DOMINANT_MOTION"
         message = "Leg motion is dominant."
         next_action = "CHECK_LEG_FIDGET"
+
+    elif posture_score >= 20:
+        reason_code = "HIGH_POSTURE_SWAY"
+        message = "Posture sway is elevated."
+        next_action = "CHECK_BODY_STABILITY"
 
     results.append({
         "track_id": track_id,
         "hand_motion_score": hand_score,
         "leg_fidget_score": leg_score,
+        "posture_sway_score": posture_score,
+        "hand_repetition_score": hand_rep_score,
         "micro_behavior_score": micro_score,
         "judgment": {
             "state": state,
