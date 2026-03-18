@@ -3,8 +3,8 @@ import csv
 import math
 from collections import defaultdict
 
-INPUT_CSV = r"C:\dev\walk\pose_output\pose_keypoints.csv"
-OUTPUT_CSV = r"C:\dev\walk\pose_output\leg_fidget_summary.csv"
+INPUT_CSV = r"C:\dev\loosegoose\walk\pose_output\pose_keypoints.csv"
+OUTPUT_CSV = r"C:\dev\loosegoose\walk\pose_output\leg_fidget_summary.csv"
 
 # COCO keypoints
 LEFT_KNEE = 13

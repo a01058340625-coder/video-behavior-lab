@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 import json
 
-INPUT_JSON = r"C:\dev\walk\pose_output\micro_behavior_snapshot.json"
-OUTPUT_JSON = r"C:\dev\walk\pose_output\micro_behavior_judgment.json"
+INPUT_JSON = r"C:\dev\loosegoose\walk\pose_output\micro_behavior_snapshot.json"
+OUTPUT_JSON = r"C:\dev\loosegoose\walk\pose_output\micro_behavior_judgment.json"
 
 with open(INPUT_JSON, "r", encoding="utf-8-sig") as f:
     snapshot = json.load(f)

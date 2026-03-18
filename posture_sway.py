@@ -3,8 +3,8 @@ import csv
 import math
 from collections import defaultdict
 
-INPUT_CSV = r"C:\dev\walk\pose_output\pose_keypoints.csv"
-OUTPUT_CSV = r"C:\dev\walk\pose_output\posture_sway_summary.csv"
+INPUT_CSV = r"C:\dev\loosegoose\walk\pose_output\pose_keypoints.csv"
+OUTPUT_CSV = r"C:\dev\loosegoose\walk\pose_output\posture_sway_summary.csv"
 
 # COCO keypoints
 LEFT_SHOULDER = 5
@@ -56,7 +56,7 @@ for track_id, frames_dict in tracks.items():
             if conf >= 0.5:
                 valid_points.append((x, y))
 
-        # ¸öÅë Áß½ÉÀ» ÀâÀ¸·Á¸é ÃÖ¼Ò 2Á¡ ÀÌ»óÀº ÀÖ¾î¾ß ÇÑ´Ù
+        # ï¿½ï¿½ï¿½ï¿½ ï¿½ß½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ö¼ï¿½ 2ï¿½ï¿½ ï¿½Ì»ï¿½ï¿½ï¿½ ï¿½Ö¾ï¿½ï¿½ ï¿½Ñ´ï¿½
         if len(valid_points) < 2:
             continue
 

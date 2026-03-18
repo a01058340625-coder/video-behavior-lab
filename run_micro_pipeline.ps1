@@ -2,7 +2,7 @@ Write-Host ""
 Write-Host "===== VIDEO BEHAVIOR LAB : MICRO PIPELINE START ====="
 Write-Host ""
 
-Set-Location "C:\dev\walk"
+Set-Location "C:\dev\loosegoose\walk"
 
 Write-Host "[1/8] pose extraction"
 python pose_extract.py
@@ -47,5 +47,5 @@ Write-Host ""
 Write-Host "===== MICRO PIPELINE DONE ====="
 Write-Host ""
 Write-Host "Result file:"
-Write-Host "C:\dev\walk\pose_output\micro_behavior_judgment.json"
+Write-Host "C:\dev\loosegoose\walk\pose_output\micro_behavior_judgment.json"
 Write-Host ""

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 import csv
 
-INPUT_CSV = r"C:\dev\walk\output\summary.csv"
-OUTPUT_CSV = r"C:\dev\walk\output\behavior.csv"
+INPUT_CSV = r"C:\dev\loosegoose\walk\output\summary.csv"
+OUTPUT_CSV = r"C:\dev\loosegoose\walk\output\behavior.csv"
 
 rows = []
 

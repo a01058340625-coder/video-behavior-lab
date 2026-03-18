@@ -1,7 +1,7 @@
 import json
 
-INPUT_JSON = r"C:\dev\walk\output\session_snapshot.json"
-OUTPUT_JSON = r"C:\dev\walk\output\session_judgment.json"
+INPUT_JSON = r"C:\dev\loosegoose\walk\output\session_snapshot.json"
+OUTPUT_JSON = r"C:\dev\loosegoose\walk\output\session_judgment.json"
 
 with open(INPUT_JSON, "r", encoding="utf-8-sig") as f:
     snapshot = json.load(f)

@@ -2,8 +2,8 @@
 import csv
 import json
 
-INPUT_CSV = r"C:\dev\walk\output\behavior.csv"
-OUTPUT_JSON = r"C:\dev\walk\output\session_snapshot.json"
+INPUT_CSV = r"C:\dev\loosegoose\walk\output\behavior.csv"
+OUTPUT_JSON = r"C:\dev\loosegoose\walk\output\session_snapshot.json"
 
 rows = []
 

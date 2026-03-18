@@ -2,8 +2,8 @@ import csv
 import math
 from collections import defaultdict
 
-INPUT_CSV = r"C:\dev\walk\output\tracks.csv"
-OUTPUT_CSV = r"C:\dev\walk\output\summary.csv"
+INPUT_CSV = r"C:\dev\loosegoose\walk\output\tracks.csv"
+OUTPUT_CSV = r"C:\dev\loosegoose\walk\output\summary.csv"
 
 tracks = defaultdict(list)
 

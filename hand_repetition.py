@@ -2,8 +2,8 @@
 import csv
 from collections import defaultdict
 
-INPUT_CSV = r"C:\dev\walk\pose_output\pose_keypoints.csv"
-OUTPUT_CSV = r"C:\dev\walk\pose_output\hand_repetition_summary.csv"
+INPUT_CSV = r"C:\dev\loosegoose\walk\pose_output\pose_keypoints.csv"
+OUTPUT_CSV = r"C:\dev\loosegoose\walk\pose_output\hand_repetition_summary.csv"
 
 LEFT_WRIST = 9
 RIGHT_WRIST = 10
@@ -51,7 +51,7 @@ for track_id, frames_dict in tracks.items():
     for kp in TARGETS:
         points = history[kp]
 
-        # ÃÖ±Ù 3°³ Á¡À¸·Î x¹æÇâ ÀüÈ¯ ¹İº¹À» º»´Ù
+        # ï¿½Ö±ï¿½ 3ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ xï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½È¯ ï¿½İºï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
         for i in range(2, len(points)):
             _, x1, y1 = points[i - 2]
             _, x2, y2 = points[i - 1]
@@ -64,7 +64,7 @@ for track_id, frames_dict in tracks.items():
 
             step_counts[kp] += 1
 
-            # ÀÛÀº ¹üÀ§ ¾È¿¡¼­ ¹æÇâÀÌ ¹Ù²î¸é repetition ÈÄº¸
+            # ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½È¿ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½Ù²ï¿½ï¿½ repetition ï¿½Äºï¿½
             x_flip = (dx1 > 0 and dx2 < 0) or (dx1 < 0 and dx2 > 0)
             y_flip = (dy1 > 0 and dy2 < 0) or (dy1 < 0 and dy2 > 0)
 

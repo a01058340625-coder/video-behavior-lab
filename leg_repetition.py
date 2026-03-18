@@ -2,8 +2,8 @@
 import csv
 from collections import defaultdict
 
-INPUT_CSV = r"C:\dev\walk\pose_output\pose_keypoints.csv"
-OUTPUT_CSV = r"C:\dev\walk\pose_output\leg_repetition_summary.csv"
+INPUT_CSV = r"C:\dev\loosegoose\walk\pose_output\pose_keypoints.csv"
+OUTPUT_CSV = r"C:\dev\loosegoose\walk\pose_output\leg_repetition_summary.csv"
 
 LEFT_KNEE = 13
 RIGHT_KNEE = 14

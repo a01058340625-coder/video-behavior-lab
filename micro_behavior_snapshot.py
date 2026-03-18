@@ -2,12 +2,12 @@
 import csv
 import json
 
-HAND_CSV = r"C:\dev\walk\pose_output\hand_motion_summary.csv"
-LEG_CSV = r"C:\dev\walk\pose_output\leg_fidget_summary.csv"
-POSTURE_CSV = r"C:\dev\walk\pose_output\posture_sway_summary.csv"
-HAND_REP_CSV = r"C:\dev\walk\pose_output\hand_repetition_summary.csv"
-LEG_REP_CSV = r"C:\dev\walk\pose_output\leg_repetition_summary.csv"
-OUTPUT_JSON = r"C:\dev\walk\pose_output\micro_behavior_snapshot.json"
+HAND_CSV = r"C:\dev\loosegoose\walk\pose_output\hand_motion_summary.csv"
+LEG_CSV = r"C:\dev\loosegoose\walk\pose_output\leg_fidget_summary.csv"
+POSTURE_CSV = r"C:\dev\loosegoose\walk\pose_output\posture_sway_summary.csv"
+HAND_REP_CSV = r"C:\dev\loosegoose\walk\pose_output\hand_repetition_summary.csv"
+LEG_REP_CSV = r"C:\dev\loosegoose\walk\pose_output\leg_repetition_summary.csv"
+OUTPUT_JSON = r"C:\dev\loosegoose\walk\pose_output\micro_behavior_snapshot.json"
 
 hand_map = {}
 leg_map = {}

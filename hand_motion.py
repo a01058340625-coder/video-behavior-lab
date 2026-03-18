@@ -3,14 +3,14 @@ import csv
 import math
 from collections import defaultdict
 
-INPUT_CSV = r"C:\dev\walk\pose_output\pose_keypoints.csv"
-OUTPUT_CSV = r"C:\dev\walk\pose_output\hand_motion_summary.csv"
+INPUT_CSV = r"C:\dev\loosegoose\walk\pose_output\pose_keypoints.csv"
+OUTPUT_CSV = r"C:\dev\loosegoose\walk\pose_output\hand_motion_summary.csv"
 
 # COCO keypoints
 LEFT_WRIST = 9
 RIGHT_WRIST = 10
 
-# track_idº°, frameº° ¼Õ¸ñ ÁÂÇ¥ ÀúÀå
+# track_idï¿½ï¿½, frameï¿½ï¿½ ï¿½Õ¸ï¿½ ï¿½ï¿½Ç¥ ï¿½ï¿½ï¿½ï¿½
 # tracks[track_id][frame][kp_index] = (x, y, conf)
 tracks = defaultdict(lambda: defaultdict(dict))
 
@@ -45,7 +45,7 @@ for track_id, frames_dict in tracks.items():
     for frame in frames:
         kp_map = frames_dict[frame]
 
-        # ¿Þ¼Õ
+        # ï¿½Þ¼ï¿½
         if LEFT_WRIST in kp_map:
             x, y, conf = kp_map[LEFT_WRIST]
             if conf >= 0.5:
@@ -55,7 +55,7 @@ for track_id, frames_dict in tracks.items():
                     left_steps += 1
                 prev_left = (x, y)
 
-        # ¿À¸¥¼Õ
+        # ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
         if RIGHT_WRIST in kp_map:
             x, y, conf = kp_map[RIGHT_WRIST]
             if conf >= 0.5:
