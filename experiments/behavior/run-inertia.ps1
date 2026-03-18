@@ -1,11 +1,7 @@
 param(
     [string]$base = "http://127.0.0.1:8083",
     [string]$internalKey = "goosage-dev",
-
-    # inertia 실험 대상 사용자
     [long[]]$userIds = @(5),
-
-    # 몇 일 streak 만들지
     [int]$days = 5
 )
 
@@ -15,40 +11,53 @@ function Ok($m){ Write-Host "[OK]  $m" -ForegroundColor Green }
 function Info($m){ Write-Host "[..]  $m" -ForegroundColor Cyan }
 
 function Post-Event($uid, $type) {
-
-    $json = @{
+    $body = @{
         userId = $uid
         type   = $type
     } | ConvertTo-Json -Compress
 
-    curl.exe -s -X POST "$base/internal/study/events" `
-        -H "X-INTERNAL-KEY: $internalKey" `
-        -H "Content-Type: application/json" `
-        --data-binary $json | Out-Null
+    $res = Invoke-RestMethod `
+        -Method Post `
+        -Uri "$base/internal/study/events" `
+        -Headers @{ "X-INTERNAL-KEY" = $internalKey } `
+        -ContentType "application/json" `
+        -Body $body
+
+    Write-Host "POST [$uid][$type] => $($res | ConvertTo-Json -Compress)"
 }
 
-function Shift-Day($uid, $daysAgo){
+function Get-MaxEventId($uid){
+    $sql = "SELECT COALESCE(MAX(id), 0) AS max_id FROM study_events WHERE user_id = $uid;"
+    $raw = docker exec goosage-mysql mysql -N -s -uroot -proot123 goosage -e $sql
+    return [long]$raw.Trim()
+}
 
-$sql = @"
+function Shift-NewEventsOnly($uid, $daysAgo, $beforeId){
+    $sql = @"
 UPDATE study_events
 SET created_at = DATE_SUB(created_at, INTERVAL $daysAgo DAY)
-WHERE user_id=$uid AND DATE(created_at)=CURDATE();
-
-UPDATE daily_learning
-SET ymd = DATE_SUB(ymd, INTERVAL $daysAgo DAY)
-WHERE user_id=$uid AND ymd=CURDATE();
+WHERE user_id = $uid
+  AND id > $beforeId;
 "@
+    docker exec goosage-mysql mysql -uroot -proot123 goosage -e $sql | Out-Null
+}
 
-docker exec goosage-mysql sh -lc "mysql -uroot -proot123 goosage -e `"$sql`"" | Out-Null
+function Show-EventDates($uid){
+    $sql = @"
+SELECT id, user_id, type, created_at
+FROM study_events
+WHERE user_id = $uid
+ORDER BY created_at DESC, id DESC
+LIMIT 30;
+"@
+    docker exec goosage-mysql mysql -uroot -proot123 goosage -e $sql
 }
 
 function Get-Coach($uid){
-
-    $url = "$base/internal/study/coach?userId=$uid"
-
-    curl.exe -s `
-        -H "X-INTERNAL-KEY: $internalKey" `
-        $url
+    Invoke-RestMethod `
+        -Method Get `
+        -Uri "$base/internal/study/coach?userId=$uid" `
+        -Headers @{ "X-INTERNAL-KEY" = $internalKey }
 }
 
 Write-Host ""
@@ -64,8 +73,9 @@ foreach($uid in $userIds){
     for($i=0; $i -lt $days; $i++){
 
         $shift = $days - $i - 1
-
         Info "Day $($i+1) -> shift $shift"
+
+        $beforeId = Get-MaxEventId $uid
 
         Post-Event $uid "JUST_OPEN"
         Post-Event $uid "QUIZ_SUBMIT"
@@ -73,17 +83,18 @@ foreach($uid in $userIds){
         Post-Event $uid "QUIZ_SUBMIT"
 
         if($shift -gt 0){
-            Shift-Day $uid $shift
+            Shift-NewEventsOnly $uid $shift $beforeId
         }
     }
 
     Write-Host ""
+    Write-Host "---- EVENT CHECK ----"
+    Show-EventDates $uid
+
+    Write-Host ""
     Write-Host "---- COACH RESULT ----"
-
     $coach = Get-Coach $uid
-
-    $coach
-
+    $coach | ConvertTo-Json -Depth 10
 }
 
 Write-Host ""

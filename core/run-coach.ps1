@@ -1,7 +1,7 @@
 ﻿param(
   [int]$userId = 12,
   [string]$base = "http://127.0.0.1:8083",
-  [string]$samplesDir = ".\samples",
+  [string]$samplesDir = "..\samples",
   [string]$loginFile = "http-auth-login.req.json"
 )
 

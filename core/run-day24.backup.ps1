@@ -7,8 +7,8 @@ param(
 
   [long[]]$userIds = @(5, 9, 10, 12),
 
-  # 추적할 공백일수 구간 (21일 하나 추가)
-  [int[]]$trackDays = @(1, 3, 7, 14, 21),
+  # 추적할 공백일수 구간
+  [int[]]$trackDays = @(1, 3, 7, 14),
 
   [switch]$ResetHistory = $true,
 
@@ -30,6 +30,27 @@ function Write-Utf8NoBom([string]$p,[string]$c){
   [System.IO.File]::WriteAllText($p,$c,$enc)
 }
 
+function Curl-Text([string]$url,[hashtable]$headers=@{}){
+  $h=@()
+  foreach($k in $headers.Keys){ $h += @("-H","${k}: $($headers[$k])") }
+  & curl.exe -sS $h $url
+}
+
+function Curl-PostJson([string]$url,[string]$jsonBody,[hashtable]$headers=@{}){
+  $tmp = Join-Path $env:TEMP ("req.day24.{0}.{1}.json" -f $PID,(Get-Random))
+  Write-Utf8NoBom $tmp $jsonBody
+
+  try {
+    $h=@()
+    foreach($k in $headers.Keys){ $h += @("-H","${k}: $($headers[$k])") }
+    $out = & curl.exe -sS -X POST $h -H "Content-Type: application/json" --data-binary "@$tmp" $url
+    return $out
+  }
+  finally {
+    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Db([string]$sql){
   $tmp = Join-Path $env:TEMP ("day24_sql_{0}_{1}.sql" -f $PID,(Get-Random))
   Write-Utf8NoBom $tmp $sql
@@ -45,46 +66,29 @@ function Db([string]$sql){
 
 function Reset-History([long]$uid){
   Db @"
-DELETE FROM study_events   WHERE user_id = $uid;
-DELETE FROM daily_learning WHERE user_id = $uid;
-
-SELECT COUNT(*) AS total_events
-FROM study_events
-WHERE user_id = $uid;
+DELETE FROM study_events   WHERE user_id=$uid;
+DELETE FROM daily_learning WHERE user_id=$uid;
+SELECT COUNT(*) AS total_events FROM study_events WHERE user_id=$uid;
 "@ | Out-Host
 }
 
-function Get-MaxEventId([long]$uid){
-  $raw = Db "SELECT COALESCE(MAX(id), 0) AS max_id FROM study_events WHERE user_id = $uid;"
-  $lines = @($raw | Where-Object { $_ -and $_.ToString().Trim() -ne "" })
-  $last  = $lines[-1].ToString().Trim()
-  return [long]$last
-}
-
 function Post-Event([long]$uid,[string]$type){
-  $body = @{
+  $json = ([ordered]@{
     userId = $uid
     type   = $type
-  } | ConvertTo-Json -Compress
+  } | ConvertTo-Json -Compress)
 
-  $res = Invoke-RestMethod `
-    -Method Post `
-    -Uri "$base/internal/study/events" `
-    -Headers @{ "X-INTERNAL-KEY" = $internalKey } `
-    -ContentType "application/json" `
-    -Body $body
-
-  Write-Host ("POST [{0}][{1}] => {2}" -f $uid, $type, ($res | ConvertTo-Json -Compress))
+  $null = Curl-PostJson "$base/internal/study/events" $json @{ "X-INTERNAL-KEY" = $internalKey }
 }
 
-function Shift-NewEventsOnly([long]$uid,[int]$daysAgo,[long]$beforeId){
+function Shift-Today([long]$uid,[int]$daysAgo){
   Db @"
 START TRANSACTION;
 
 UPDATE study_events
 SET created_at = DATE_SUB(created_at, INTERVAL $daysAgo DAY)
 WHERE user_id = $uid
-  AND id > $beforeId;
+  AND DATE(created_at) = CURDATE();
 
 DELETE dl_today
 FROM daily_learning dl_today
@@ -101,17 +105,12 @@ WHERE user_id = $uid
 
 COMMIT;
 
-SELECT 'shift_done' AS status, $uid AS user_id, $daysAgo AS days_ago, $beforeId AS before_id;
+SELECT 'shift_done' AS status, $uid AS user_id, $daysAgo AS days_ago;
 "@ | Out-Host
 }
 
 function Get-Coach([long]$uid){
-  $res = Invoke-RestMethod `
-    -Method Get `
-    -Uri "$base/internal/study/coach?userId=$uid" `
-    -Headers @{ "X-INTERNAL-KEY" = $internalKey }
-
-  return ($res | ConvertTo-Json -Depth 10)
+  Curl-Text "$base/internal/study/coach?userId=$uid" @{ "X-INTERNAL-KEY" = $internalKey }
 }
 
 function Save-Coach([long]$uid,[string]$tag,[string]$json){
@@ -127,26 +126,6 @@ function Save-Coach([long]$uid,[string]$tag,[string]$json){
   Ok "saved => $file"
 }
 
-function Show-EventSummary([long]$uid){
-  Db @"
-SELECT user_id, type, COUNT(*) AS cnt
-FROM study_events
-WHERE user_id = $uid
-GROUP BY user_id, type
-ORDER BY type;
-"@ | Out-Host
-}
-
-function Show-EventDates([long]$uid){
-  Db @"
-SELECT id, user_id, type, created_at
-FROM study_events
-WHERE user_id = $uid
-ORDER BY created_at DESC, id DESC
-LIMIT 20;
-"@ | Out-Host
-}
-
 function Seed-LongGap([long]$uid,[int]$daysAgo){
   Warn "USER $uid trackDays=$daysAgo"
 
@@ -154,22 +133,14 @@ function Seed-LongGap([long]$uid,[int]$daysAgo){
     Reset-History $uid
   }
 
-  $beforeId = Get-MaxEventId $uid
-
-  # 과거 학습 흔적 2개 생성
+  # 과거에 학습 흔적 2개 생성 후 해당 일수만큼 과거로 이동
   Post-Event $uid "JUST_OPEN"
   Post-Event $uid "QUIZ_SUBMIT"
 
   if($daysAgo -gt 0){
-    Shift-NewEventsOnly $uid $daysAgo $beforeId
+    Shift-Today $uid $daysAgo
   }
 }
-
-Write-Host ""
-Write-Host "======================================="
-Write-Host " GooSage DAY24 LONG-TERM RISK TRACK"
-Write-Host "======================================="
-Write-Host ""
 
 foreach($uid in $userIds){
 
@@ -181,16 +152,6 @@ foreach($uid in $userIds){
 
     Seed-LongGap $uid $d
 
-    Write-Host ""
-    Write-Host "---- EVENT SUMMARY ----"
-    Show-EventSummary $uid
-
-    Write-Host ""
-    Write-Host "---- EVENT DATES ----"
-    Show-EventDates $uid
-
-    Write-Host ""
-    Write-Host "---- COACH RESULT ----"
     $coach = Get-Coach $uid
     $coach | Out-Host
 
@@ -199,5 +160,4 @@ foreach($uid in $userIds){
   }
 }
 
-Write-Host ""
 Ok "DAY24 DONE"
