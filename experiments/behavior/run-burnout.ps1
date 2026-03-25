@@ -1,191 +1,200 @@
 param(
-  [string]$base = "http://127.0.0.1:8083",
-  [string]$email = "u101@goosage.test",
-  [string]$password = "1234",
+  [string]$base = "http://127.0.0.1:8084",
   [long]$targetUserId = 13,
+  [string]$loginEmail = "u101@goosage.test",
+  [string]$loginPassword = "1234",
 
-  [int]$quizCount = 5,
-  [int]$sleepMs = 300,
+  [string]$mysqlContainer = "goosage-mysql",
+  [string]$dbName = "goosage",
+  [string]$dbUser = "root",
+  [string]$dbPass = "root123",
 
   [switch]$ResetToday = $true
 )
 
-Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
 
-$scriptRoot  = $PSScriptRoot
-$projectRoot = (Resolve-Path (Join-Path $scriptRoot "..\..")).Path
+function Write-Section($title) {
+  Write-Host ""
+  Write-Host "==== $title ===="
+}
 
-$cookieDir   = Join-Path $projectRoot "core\cookies"
-$artifactDir = Join-Path $projectRoot "core\artifacts"
-
-function Ensure-Dir([string]$path) {
+function Ensure-Dir($path) {
   if (-not (Test-Path $path)) {
     New-Item -ItemType Directory -Path $path -Force | Out-Null
   }
 }
 
-function Write-Step([string]$msg) {
-  Write-Host ""
-  Write-Host "==== $msg ===="
+function Write-Utf8NoBom([string]$path, [string]$text) {
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($path, $text, $utf8NoBom)
 }
 
-function Save-JsonPretty([string]$path, $obj) {
-  $json = $obj | ConvertTo-Json -Depth 10
-  [System.IO.File]::WriteAllText($path, $json, [System.Text.UTF8Encoding]::new($false))
+function Invoke-MySqlFile([string]$sqlFile) {
+  $sqlText = Get-Content $sqlFile -Raw
+
+  $sqlText | docker exec -i $mysqlContainer `
+    mysql `
+    "-u$($dbUser)" `
+    "-p$($dbPass)" `
+    $dbName
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "MYSQL FAILED: exitCode=$LASTEXITCODE"
+  }
 }
-
-function Save-JsonCompact([string]$path, $obj) {
-  $json = $obj | ConvertTo-Json -Compress
-  [System.IO.File]::WriteAllText($path, $json, [System.Text.UTF8Encoding]::new($false))
-}
-
-function Exec-MySql([string]$sql) {
-  docker exec goosage-mysql mysql -uroot -proot123 goosage -e $sql
-}
-
-Ensure-Dir $cookieDir
-Ensure-Dir $artifactDir
-
-$ts = Get-Date -Format "yyyyMMdd-HHmmss"
-
-$cookieFile        = Join-Path $cookieDir   "cookie.burnout.$targetUserId.txt"
-$coachBeforeFile   = Join-Path $artifactDir "coach.exp.burnout.before.u$targetUserId.$ts.json"
-$coachAfterFile    = Join-Path $artifactDir "coach.exp.burnout.after.u$targetUserId.$ts.json"
-$loginReqFile      = Join-Path $artifactDir "req.burnout.login.u$targetUserId.$ts.json"
-$eventReqFile      = Join-Path $artifactDir "req.burnout.event.u$targetUserId.$ts.json"
-$logFile           = Join-Path $artifactDir "exp.burnout.u$targetUserId.$ts.log"
-
-Start-Transcript -Path $logFile -Force | Out-Null
 
 try {
-  Write-Step "PATH CHECK"
+  $scriptRoot  = Split-Path -Parent $MyInvocation.MyCommand.Path
+  $projectRoot = Split-Path -Parent (Split-Path -Parent $scriptRoot)
+  $cookieDir   = Join-Path $projectRoot "core\cookies"
+  $artifactDir = Join-Path $projectRoot "core\artifacts"
+  $ts          = Get-Date -Format "yyyyMMdd-HHmmss"
+
+  Ensure-Dir $cookieDir
+  Ensure-Dir $artifactDir
+
+  $cookieFile    = Join-Path $cookieDir "cookie.u$targetUserId.txt"
+  $loginReqFile  = Join-Path $artifactDir "req.burnout.login.u$targetUserId.$ts.json"
+  $loginRespFile = Join-Path $artifactDir "resp.burnout.login.u$targetUserId.$ts.txt"
+  $coachRespFile = Join-Path $artifactDir "coach.burnout.u$targetUserId.$ts.json"
+  $sqlFile       = Join-Path $artifactDir "sql.burnout.reset.u$targetUserId.$ts.sql"
+
+  Write-Section "PATH CHECK"
   Write-Host "scriptRoot  => $scriptRoot"
   Write-Host "projectRoot => $projectRoot"
   Write-Host "cookieDir   => $cookieDir"
   Write-Host "artifactDir => $artifactDir"
 
   if ($ResetToday) {
-    Write-Step "0) RESET TODAY"
-    $deleteSql = @"
+    Write-Section "0) RESET TODAY"
+
+    $sql = @"
 DELETE FROM study_events
-WHERE user_id=$targetUserId
-AND DATE(created_at)=CURDATE();
+WHERE user_id = $targetUserId
+  AND created_at >= CURDATE()
+  AND created_at < DATE_ADD(CURDATE(), INTERVAL 1 DAY);
 "@
-    Exec-MySql $deleteSql
-    Write-Host "today events deleted for userId=$targetUserId"
+
+   Write-Utf8NoBom $sqlFile $sql
+Invoke-MySqlFile $sqlFile
+Write-Host "today events deleted for userId=$targetUserId"
   }
 
-  Write-Step "1) LOGIN"
+  Write-Section "1) LOGIN"
 
-  $loginBody = @{
-    email    = $email
-    password = $password
+  $loginReq = @{
+    email    = $loginEmail
+    password = $loginPassword
+  } | ConvertTo-Json -Compress
+
+  Write-Utf8NoBom $loginReqFile $loginReq
+  Get-Content $loginReqFile -Raw | Out-Host
+
+  if (Test-Path $loginRespFile) {
+    Remove-Item $loginRespFile -Force
   }
 
-  Save-JsonCompact $loginReqFile $loginBody
-  Get-Content $loginReqFile | Out-Host
+  $curlErrFile = Join-Path $artifactDir "resp.burnout.login.err.u$targetUserId.$ts.txt"
 
-  $loginRaw = curl.exe -s -c $cookieFile `
-    -H "Content-Type: application/json" `
-    -X POST "$base/auth/login" `
-    --data-binary "@$loginReqFile"
+if (Test-Path $loginRespFile) { Remove-Item $loginRespFile -Force }
+if (Test-Path $curlErrFile)   { Remove-Item $curlErrFile -Force }
 
+$oldEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+
+$httpCode = & curl.exe `
+  -sS `
+  -o $loginRespFile `
+  -w "%{http_code}" `
+  -c $cookieFile `
+  -H "Content-Type: application/json" `
+  -X POST "$base/auth/login" `
+  --data-binary "@$loginReqFile" `
+  2> $curlErrFile
+
+$curlExit = $LASTEXITCODE
+$ErrorActionPreference = $oldEap
+
+Write-Host "CURL EXIT => $curlExit"
+Write-Host "LOGIN HTTP => $httpCode"
+
+if (Test-Path $curlErrFile) {
+  $curlErr = Get-Content $curlErrFile -Raw
+  if (-not [string]::IsNullOrWhiteSpace($curlErr)) {
+    Write-Host "LOGIN STDERR =>"
+    $curlErr | Out-Host
+  }
+}
+
+if ($curlExit -ne 0) {
+  throw "LOGIN FAILED: curl exitCode=$curlExit"
+}
+
+if (-not (Test-Path $loginRespFile)) {
+  throw "LOGIN FAILED: response file not created => $loginRespFile"
+}
+
+  $loginRaw = Get-Content $loginRespFile -Raw
+
+  Write-Host "LOGIN HTTP => $httpCode"
+  Write-Host "LOGIN RAW =>"
   $loginRaw | Out-Host
-  $loginObj = $loginRaw | ConvertFrom-Json
+
+  if ([string]::IsNullOrWhiteSpace($loginRaw)) {
+    throw "LOGIN FAILED: empty response"
+  }
+
+  try {
+    $loginObj = $loginRaw | ConvertFrom-Json
+  }
+  catch {
+    throw "LOGIN FAILED: invalid JSON => $loginRaw"
+  }
+
+  if ($null -eq $loginObj.PSObject.Properties['success']) {
+    throw "LOGIN FAILED: 'success' field missing => $loginRaw"
+  }
 
   if (-not $loginObj.success) {
     throw "LOGIN FAILED: $($loginObj.message)"
   }
 
-  Write-Host "Cookie file => $cookieFile"
+  Write-Host "login success"
 
-  Write-Step "2) COACH BEFORE"
+  Write-Section "2) COACH CHECK"
 
-  $coachBeforeRaw = curl.exe -s -b $cookieFile "$base/study/coach?userId=$targetUserId"
-  $coachBeforeRaw | Out-Host
-  $coachBeforeObj = $coachBeforeRaw | ConvertFrom-Json
+  $coachRaw = curl.exe -s -b $cookieFile "$base/study/coach"
+  Write-Utf8NoBom $coachRespFile $coachRaw
 
-  Save-JsonPretty $coachBeforeFile $coachBeforeObj
-  Write-Host "saved: $coachBeforeFile"
+  Write-Host "saved => $coachRespFile"
+  $coachRaw | Out-Host
 
-  if (-not $coachBeforeObj.success) {
-    throw "COACH BEFORE FAILED: $($coachBeforeObj.message)"
+  if ([string]::IsNullOrWhiteSpace($coachRaw)) {
+    throw "COACH FAILED: empty response"
   }
 
-  Write-Step "3) BUILD SAFE BASELINE (QUIZ_SUBMIT x $quizCount)"
-
-  for ($i = 1; $i -le $quizCount; $i++) {
-    $eventBody = @{
-      userId = $targetUserId
-      type   = "QUIZ_SUBMIT"
-    }
-
-    Save-JsonCompact $eventReqFile $eventBody
-
-    Write-Host "[QUIZ $i/$quizCount]"
-    Get-Content $eventReqFile | Out-Host
-
-    $eventResp = curl.exe -s -b $cookieFile `
-      -H "Content-Type: application/json" `
-      -X POST "$base/study/events" `
-      --data-binary "@$eventReqFile"
-
-    $eventResp | Out-Host
-    $eventObj = $eventResp | ConvertFrom-Json
-
-    if (-not $eventObj.success) {
-      throw "QUIZ EVENT FAILED ($i/$quizCount): $($eventObj.message)"
-    }
-
-    Start-Sleep -Milliseconds $sleepMs
+  try {
+    $coachObj = $coachRaw | ConvertFrom-Json
+  }
+  catch {
+    throw "COACH FAILED: invalid JSON => $coachRaw"
   }
 
-  Write-Step "4) COACH AFTER (SAFE BASELINE CHECK)"
-
-  $coachAfterRaw = curl.exe -s -b $cookieFile "$base/study/coach?userId=$targetUserId"
-  $coachAfterRaw | Out-Host
-  $coachAfterObj = $coachAfterRaw | ConvertFrom-Json
-
-  Save-JsonPretty $coachAfterFile $coachAfterObj
-  Write-Host "saved: $coachAfterFile"
-
-  if (-not $coachAfterObj.success) {
-    throw "COACH AFTER FAILED: $($coachAfterObj.message)"
+  if ($null -eq $coachObj.PSObject.Properties['success']) {
+    throw "COACH FAILED: 'success' field missing => $coachRaw"
   }
 
-  Write-Step "5) RESULT SUMMARY"
+  if (-not $coachObj.success) {
+    throw "COACH FAILED: $($coachObj.message)"
+  }
 
-  $beforeLevel  = $coachBeforeObj.data.prediction.level
-  $beforeReason = $coachBeforeObj.data.prediction.reasonCode
-  $beforeAction = $coachBeforeObj.data.nextAction
-
-  $afterEvents  = $coachAfterObj.data.state.eventsCount
-  $afterQuiz    = $coachAfterObj.data.state.quizSubmits
-  $afterLevel   = $coachAfterObj.data.prediction.level
-  $afterReason  = $coachAfterObj.data.prediction.reasonCode
-  $afterAction  = $coachAfterObj.data.nextAction
-
-  Write-Host "Before prediction : $beforeLevel / $beforeReason"
-  Write-Host "Before nextAction : $beforeAction"
-  Write-Host "After eventsCount : $afterEvents"
-  Write-Host "After quizSubmits : $afterQuiz"
-  Write-Host "After prediction  : $afterLevel / $afterReason"
-  Write-Host "After nextAction  : $afterAction"
-
-  Write-Step "6) INTERPRETATION"
-  Write-Host "- 이 스크립트는 burnout 베이스라인(SAFE 상태)을 만드는 용도다."
-  Write-Host "- 오늘은 SAFE를 만든 뒤 snapshot을 저장한다."
-  Write-Host "- 다음 날 또는 공백 후 같은 userId의 coach를 다시 조회해 WARNING/RISK 전환을 본다."
-  Write-Host "- 핵심 지표: daysSinceLastEvent, recentEventCount3d, streakDays, prediction level"
-
-  Write-Step "DONE"
+  Write-Section "DONE"
+  Write-Host "run-burnout completed"
 }
 catch {
   Write-Host ""
-  Write-Host "[ERROR] $($_.Exception.Message)"
+  Write-Host "[ERROR] $($_.Exception.Message)" -ForegroundColor Red
   throw
-}
-finally {
-  Stop-Transcript | Out-Null
 }

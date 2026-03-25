@@ -17,7 +17,7 @@ function Invoke-ActionMany {
     param(
         [Parameter(Mandatory=$true)][int]$loginUserNo,
         [Parameter(Mandatory=$true)][int]$targetUserId,
-        [Parameter(Mandatory=$true)][ValidateSet("JUST_OPEN","QUIZ_SUBMIT","REVIEW_WRONG")][string]$action,
+        [Parameter(Mandatory=$true)][ValidateSet("JUST_OPEN","QUIZ_SUBMIT","REVIEW_WRONG","WRONG_REVIEW_DONE")][string]$action,
         [Parameter(Mandatory=$true)][int]$count,
         [string]$base = "http://127.0.0.1:8083"
     )
@@ -51,18 +51,20 @@ function Invoke-UserScenario {
         [Parameter(Mandatory=$true)][int]$justOpen,
         [Parameter(Mandatory=$true)][int]$quiz,
         [Parameter(Mandatory=$true)][int]$wrong,
+        [int]$wrongDone = 0,
         [string]$base = "http://127.0.0.1:8083",
         [string]$tag = "days"
     )
 
     Write-Host ""
-    Write-Host ("[{0}] login={1} target={2} persona={3} | open={4} quiz={5} wrong={6}" -f `
-        $user.label, $user.loginUserNo, $user.targetUserId, $user.persona, $justOpen, $quiz, $wrong) `
+    Write-Host ("[{0}] login={1} target={2} persona={3} | open={4} quiz={5} wrong={6} wrongDone={7}" -f `
+        $user.label, $user.loginUserNo, $user.targetUserId, $user.persona, $justOpen, $quiz, $wrong, $wrongDone) `
         -ForegroundColor Yellow
 
-    Invoke-ActionMany -loginUserNo $user.loginUserNo -targetUserId $user.targetUserId -action "JUST_OPEN"    -count $justOpen -base $base
-    Invoke-ActionMany -loginUserNo $user.loginUserNo -targetUserId $user.targetUserId -action "QUIZ_SUBMIT"  -count $quiz     -base $base
-    Invoke-ActionMany -loginUserNo $user.loginUserNo -targetUserId $user.targetUserId -action "REVIEW_WRONG" -count $wrong    -base $base
+    Invoke-ActionMany -loginUserNo $user.loginUserNo -targetUserId $user.targetUserId -action "JUST_OPEN"         -count $justOpen  -base $base
+    Invoke-ActionMany -loginUserNo $user.loginUserNo -targetUserId $user.targetUserId -action "QUIZ_SUBMIT"       -count $quiz      -base $base
+    Invoke-ActionMany -loginUserNo $user.loginUserNo -targetUserId $user.targetUserId -action "REVIEW_WRONG"      -count $wrong     -base $base
+    Invoke-ActionMany -loginUserNo $user.loginUserNo -targetUserId $user.targetUserId -action "WRONG_REVIEW_DONE" -count $wrongDone -base $base
 }
 
 function Show-TodayDbSummary {

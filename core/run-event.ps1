@@ -1,7 +1,7 @@
 param(
   [Parameter(Mandatory=$true)][int]$loginUserNo,
   [Parameter(Mandatory=$true)][int]$targetUserId,
-  [Parameter(Mandatory=$true)][ValidateSet("JUST_OPEN","QUIZ_SUBMIT","REVIEW_WRONG")][string]$action,
+  [Parameter(Mandatory=$true)][ValidateSet("JUST_OPEN","QUIZ_SUBMIT","REVIEW_WRONG","WRONG_REVIEW_DONE")][string]$action,
   [string]$base = "http://127.0.0.1:8083",
   [switch]$SkipCoach
 )
