@@ -52,19 +52,32 @@ function Invoke-UserScenario {
         [Parameter(Mandatory=$true)][int]$quiz,
         [Parameter(Mandatory=$true)][int]$wrong,
         [int]$wrongDone = 0,
+        [int]$daysAgo = 0,
         [string]$base = "http://127.0.0.1:8083",
         [string]$tag = "days"
     )
 
     Write-Host ""
-    Write-Host ("[{0}] login={1} target={2} persona={3} | open={4} quiz={5} wrong={6} wrongDone={7}" -f `
-        $user.label, $user.loginUserNo, $user.targetUserId, $user.persona, $justOpen, $quiz, $wrong, $wrongDone) `
+    Write-Host ("[{0}] login={1} target={2} persona={3} | open={4} quiz={5} wrong={6} wrongDone={7} daysAgo={8}" -f `
+        $user.label, $user.loginUserNo, $user.targetUserId, $user.persona, $justOpen, $quiz, $wrong, $wrongDone, $daysAgo) `
         -ForegroundColor Yellow
 
     Invoke-ActionMany -loginUserNo $user.loginUserNo -targetUserId $user.targetUserId -action "JUST_OPEN"         -count $justOpen  -base $base
     Invoke-ActionMany -loginUserNo $user.loginUserNo -targetUserId $user.targetUserId -action "QUIZ_SUBMIT"       -count $quiz      -base $base
     Invoke-ActionMany -loginUserNo $user.loginUserNo -targetUserId $user.targetUserId -action "REVIEW_WRONG"      -count $wrong     -base $base
     Invoke-ActionMany -loginUserNo $user.loginUserNo -targetUserId $user.targetUserId -action "WRONG_REVIEW_DONE" -count $wrongDone -base $base
+
+    if ($daysAgo -gt 0) {
+        $dbContainer = "goosage-mysql"
+        $dbName = "goosage"
+
+        docker exec $dbContainer mysql -uroot -proot123 $dbName -e @"
+update study_events
+set created_at = date_sub(created_at, interval $daysAgo day)
+where user_id = $($user.targetUserId)
+  and date(created_at) = curdate();
+"@
+    }
 }
 
 function Show-TodayDbSummary {

@@ -1,23 +1,6 @@
 param(
-  [ValidateSet("seed","close","all")]
-  [string]$mode = "all",
-
-  [string]$base = "http://127.0.0.1:8084",
-  [string]$internalKey = "goosage-dev",
-
-  [long]$blankUser = 5,
-  [long]$comebackUser = 9,
-  [long]$steadyUser = 10,
-  [long]$wrongHeavyUser = 12,
-  [long]$recoveryUser = 13,
-  [long]$anomalyUser = 14,
-
-  [switch]$ResetHistory = $true,
-
-  [string]$mysqlContainer = "goosage-mysql",
-  [string]$dbName = "goosage",
-  [string]$dbUser = "root",
-  [string]$dbPass = "root123"
+  [string]$artifactsDir = "C:\dev\loosegoose\goosage-scripts\core\artifacts",
+  [long[]]$userIds = @(5, 9, 10, 12, 13, 14)
 )
 
 chcp 65001 > $null
@@ -27,320 +10,304 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-function Ok($m){ Write-Host "[OK]  $m" -ForegroundColor Green }
-function Warn($m){ Write-Host "[!!]  $m" -ForegroundColor Yellow }
-function Fail($m){ Write-Host "[FAIL] $m" -ForegroundColor Red; throw $m }
+$tagMap = @{ }
+$tagMap[[long]5]  = "blank"
+$tagMap[[long]9]  = "comeback"
+$tagMap[[long]10] = "steady"
+$tagMap[[long]12] = "wrongheavy"
+$tagMap[[long]13] = "recovery"
+$tagMap[[long]14] = "anomaly"
 
-function Write-Utf8NoBom([string]$p,[string]$c){
-  $enc = New-Object System.Text.UTF8Encoding($false)
-  [System.IO.File]::WriteAllText($p,$c,$enc)
-}
-
-function Curl-Text([string]$url,[hashtable]$headers=@{}){
-  $h = @()
-  foreach($k in $headers.Keys){
-    $h += @("-H","${k}: $($headers[$k])")
-  }
-  & curl.exe -sS $h $url
-}
-
-function Curl-PostJson([string]$url,[string]$jsonBody,[hashtable]$headers=@{}){
-  $tmp = Join-Path $env:TEMP ("req.day30.{0}.{1}.json" -f $PID,(Get-Random))
-  Write-Utf8NoBom $tmp $jsonBody
-
-  try {
-    $h = @()
-    foreach($k in $headers.Keys){
-      $h += @("-H","${k}: $($headers[$k])")
+function Safe-Get($obj,[string]$path){
+  $cur = $obj
+  foreach($p in ($path -split "\.")){
+    if($null -eq $cur){ return $null }
+    if($cur.PSObject.Properties.Name -contains $p){
+      $cur = $cur.$p
     }
-    & curl.exe -sS -X POST $h -H "Content-Type: application/json" --data-binary "@$tmp" $url
+    else {
+      return $null
+    }
   }
-  finally {
-    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-  }
+  return $cur
 }
 
-function Db([string]$sql){
-  $tmp = Join-Path $env:TEMP ("day30_sql_{0}_{1}.sql" -f $PID,(Get-Random))
-  Write-Utf8NoBom $tmp $sql
-
-  try {
-    docker cp $tmp "${mysqlContainer}:/tmp/day30.sql" | Out-Null
-    docker exec $mysqlContainer sh -lc "mysql -N -u$dbUser -p$dbPass $dbName < /tmp/day30.sql"
+function Safe-Get-Any($obj,[string[]]$paths){
+  foreach($path in $paths){
+    $v = Safe-Get $obj $path
+    if($null -ne $v){ return $v }
   }
-  finally {
-    Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-    docker exec $mysqlContainer sh -lc "rm -f /tmp/day30.sql" | Out-Null
-  }
+  return $null
 }
 
-function Reset-History([long]$uid){
-  Db @"
-DELETE FROM study_events   WHERE user_id=$uid;
-DELETE FROM daily_learning WHERE user_id=$uid;
-"@ | Out-Null
+function Pick-Latest([System.IO.FileInfo[]]$files,[string]$tag,[long]$uid){
+  $matched = @(
+    $files |
+    Where-Object { $_.Name -match "^coach\.day31\.(blank|comeback|steady|wrongheavy|recovery|anomaly)\.user\d+\.\d{8}-\d{9}\.json$" } |
+    Where-Object { $_.Name -match ("^coach\.day31\.{0}\.user{1}\.\d{{8}}-\d{{9}}\.json$" -f [regex]::Escape($tag), $uid) } |
+    Sort-Object LastWriteTime -Descending
+  )
+
+  if($matched.Length -gt 0){ return $matched[0] }
+  return $null
 }
 
-function Post-Event([long]$uid,[string]$type){
-  $json = ([ordered]@{
-    userId = $uid
-    type   = $type
-  } | ConvertTo-Json -Compress)
-
-  $null = Curl-PostJson "$base/internal/study/events" $json @{ "X-INTERNAL-KEY" = $internalKey }
+function Load-JsonFile([System.IO.FileInfo]$file){
+  Get-Content $file.FullName -Raw -Encoding utf8 | ConvertFrom-Json
 }
 
-function Shift-Today([long]$uid,[int]$daysAgo){
-  if($daysAgo -le 0){ return }
-
-  Db @"
-START TRANSACTION;
-
-UPDATE study_events
-SET created_at = DATE_SUB(created_at, INTERVAL $daysAgo DAY)
-WHERE user_id = $uid
-  AND DATE(created_at) = CURDATE();
-
-DELETE dl_today
-FROM daily_learning dl_today
-JOIN daily_learning dl_target
-  ON dl_target.user_id = dl_today.user_id
- AND dl_target.ymd = DATE_SUB(dl_today.ymd, INTERVAL $daysAgo DAY)
-WHERE dl_today.user_id = $uid
-  AND dl_today.ymd = CURDATE();
-
-UPDATE daily_learning
-SET ymd = DATE_SUB(ymd, INTERVAL $daysAgo DAY)
-WHERE user_id = $uid
-  AND ymd = CURDATE();
-
-COMMIT;
-"@ | Out-Null
+function To-Int($v,[int]$default=0){
+  if($null -eq $v){ return $default }
+  try { return [int]$v } catch { return $default }
 }
 
-function Get-Coach([long]$uid){
-  Curl-Text "$base/internal/study/coach?userId=$uid" @{ "X-INTERNAL-KEY" = $internalKey } | ConvertFrom-Json
+function To-Double($v,[double]$default=0.0){
+  if($null -eq $v){ return $default }
+  try { return [double]$v } catch { return $default }
 }
 
-function Get-RawSummary([long]$uid){
-  $raw = Db @"
-SELECT
-  COUNT(*) AS total_events,
-  COALESCE(SUM(type='JUST_OPEN'),0) AS opens,
-  COALESCE(SUM(type='QUIZ_SUBMIT'),0) AS quiz,
-  COALESCE(SUM(type='REVIEW_WRONG'),0) AS wrongs,
-  COALESCE(SUM(type='WRONG_REVIEW_DONE'),0) AS wrong_done,
-  COUNT(DISTINCT DATE(created_at)) AS active_days,
-  MIN(DATE(created_at)) AS first_day,
-  MAX(DATE(created_at)) AS last_day
-FROM study_events
-WHERE user_id = $uid;
-"@
-
-  $cols = @()
-  if($null -ne $raw){
-    $cols = @($raw -split '\s+')
-  }
-
-  return [pscustomobject]@{
-    total_events = if($cols.Length -ge 1){ [int]$cols[0] } else { 0 }
-    opens        = if($cols.Length -ge 2){ [int]$cols[1] } else { 0 }
-    quiz         = if($cols.Length -ge 3){ [int]$cols[2] } else { 0 }
-    wrong        = if($cols.Length -ge 4){ [int]$cols[3] } else { 0 }
-    wrong_done   = if($cols.Length -ge 5){ [int]$cols[4] } else { 0 }
-    active_days  = if($cols.Length -ge 6){ [int]$cols[5] } else { 0 }
-    first_day    = if($cols.Length -ge 7){ $cols[6] } else { $null }
-    last_day     = if($cols.Length -ge 8){ $cols[7] } else { $null }
-  }
+function Same-Decision($aLevel,$aReason,$aAction,$bLevel,$bReason,$bAction){
+  return (
+    $aLevel  -eq $bLevel  -and
+    $aReason -eq $bReason -and
+    $aAction -eq $bAction
+  )
 }
 
-function Get-Ratios([object]$raw){
-  $total = [double]([Math]::Max(1, $raw.total_events))
-  return [pscustomobject]@{
-    open_ratio  = [math]::Round(($raw.opens / $total), 2)
-    quiz_ratio  = [math]::Round(($raw.quiz / $total), 2)
-    wrong_ratio = [math]::Round(($raw.wrong / $total), 2)
-    done_ratio  = [math]::Round(($raw.wrong_done / $total), 2)
-  }
-}
-
-function Save-Coach([long]$uid,[string]$tag,[object]$obj){
-  $ts  = (Get-Date).ToString("yyyyMMdd-HHmmssfff")
-  $dir = Join-Path (Join-Path (Split-Path $PSScriptRoot -Parent) "core") "artifacts"
-
-  if(-not (Test-Path $dir)){
-    New-Item -ItemType Directory -Path $dir | Out-Null
-  }
-
-  $file = Join-Path $dir ("coach.day30.{0}.user{1}.{2}.json" -f $tag,$uid,$ts)
-  ($obj | ConvertTo-Json -Depth 20) | Out-File $file -Encoding utf8
-  Ok "saved => $file"
-}
-
-function Get-PropValue($obj,[string]$name,$default=$null){
-  if($null -eq $obj){ return $default }
-  $p = $obj.PSObject.Properties[$name]
-  if($null -eq $p){ return $default }
-  if($null -eq $p.Value){ return $default }
-  return $p.Value
-}
-
-function Print-CoachSummary([long]$uid,[string]$tag,[object]$coach,[object]$raw,[object]$ratio){
-  $p = $coach.prediction
-  $e = if($p){ $p.evidence } else { $null }
-  $s = $coach.state
-
-  $level      = Get-PropValue $p "level" "-"
-  $reasonCode = Get-PropValue $p "reasonCode" "-"
-  $nextAction = Get-PropValue $coach "nextAction" "-"
-  $daysSince  = Get-PropValue $e "daysSinceLastEvent" "-"
-  $recent3d   = Get-PropValue $e "recentEventCount3d" "-"
-  $streakDays = Get-PropValue $e "streakDays" "-"
-  $eventsCnt  = Get-PropValue $s "eventsCount" 0
-  $quizCnt    = Get-PropValue $s "quizSubmits" 0
-  $wrongCnt   = Get-PropValue $s "wrongReviews" 0
-  $wrongDone = Get-PropValue $s "wrongReviewDoneCount" 0
-
-  Write-Host ""
-  Write-Host "[SCENARIO] $tag user=$uid" -ForegroundColor Cyan
-  Write-Host (" level={0} reason={1} action={2}" -f $level,$reasonCode,$nextAction)
-  Write-Host (" evidence: daysSince={0} recent3d={1} streak={2}" -f $daysSince,$recent3d,$streakDays)
-  Write-Host (" state:    events={0} quiz={1} wrong={2} wrongDone={3}" -f $eventsCnt,$quizCnt,$wrongCnt,$wrongDone)
-  Write-Host (" raw:      total={0} opens={1} quiz={2} wrong={3} wrongDone={4} activeDays={5}" -f `
-    $raw.total_events,$raw.opens,$raw.quiz,$raw.wrong,$raw.wrong_done,$raw.active_days)
-  Write-Host (" ratio:    open={0} quiz={1} wrong={2} done={3}" -f `
-    $ratio.open_ratio,$ratio.quiz_ratio,$ratio.wrong_ratio,$ratio.done_ratio)
-  Write-Host (" range:    first={0} last={1}" -f $raw.first_day,$raw.last_day)
-}
-
-function Seed-Phase(
-  [long]$uid,
-  [int]$open,
-  [int]$quiz,
-  [int]$wrong,
-  [int]$wrongDone,
-  [int]$daysAgo
-){
-  if($open -gt 0){
-    1..$open | ForEach-Object { Post-Event $uid "JUST_OPEN" }
-  }
-
-  if($quiz -gt 0){
-    1..$quiz | ForEach-Object { Post-Event $uid "QUIZ_SUBMIT" }
-  }
-
-  if($wrong -gt 0){
-    1..$wrong | ForEach-Object { Post-Event $uid "REVIEW_WRONG" }
-  }
-
-  if($wrongDone -gt 0){
-    1..$wrongDone | ForEach-Object { Post-Event $uid "WRONG_REVIEW_DONE" }
-  }
-
-  if($daysAgo -gt 0){
-    Shift-Today $uid $daysAgo
-  }
-}
-
-$scenarios = @(
-  [pscustomobject]@{
-    userId = $blankUser
-    tag    = "blank"
-    title  = "BLANK"
-    phases = @()
-  },
-  [pscustomobject]@{
-    userId = $comebackUser
-    tag    = "comeback"
-    title  = "COMEBACK"
-    phases = @(
-      @{ open = 1; quiz = 0; wrong = 0; wrongDone = 0; daysAgo = 4 },
-      @{ open = 1; quiz = 1; wrong = 0; wrongDone = 0; daysAgo = 0 }
-    )
-  },
-  [pscustomobject]@{
-    userId = $steadyUser
-    tag    = "steady"
-    title  = "STEADY"
-    phases = @(
-      @{ open = 1; quiz = 1; wrong = 0; wrongDone = 0; daysAgo = 2 },
-      @{ open = 1; quiz = 2; wrong = 0; wrongDone = 0; daysAgo = 1 },
-      @{ open = 1; quiz = 3; wrong = 0; wrongDone = 0; daysAgo = 0 }
-    )
-  },
-  [pscustomobject]@{
-    userId = $wrongHeavyUser
-    tag    = "wrongheavy"
-    title  = "WRONG_HEAVY"
-    phases = @(
-      @{ open = 1; quiz = 1; wrong = 3; wrongDone = 0; daysAgo = 1 },
-      @{ open = 1; quiz = 1; wrong = 5; wrongDone = 1; daysAgo = 0 }
-    )
-  },
-  [pscustomobject]@{
-    userId = $recoveryUser
-    tag    = "recovery"
-    title  = "RECOVERY"
-    phases = @(
-      @{ open = 1; quiz = 1; wrong = 3; wrongDone = 0; daysAgo = 1 },
-      @{ open = 1; quiz = 1; wrong = 1; wrongDone = 4; daysAgo = 0 }
-    )
-  },
-  [pscustomobject]@{
-    userId = $anomalyUser
-    tag    = "anomaly"
-    title  = "ANOMALY"
-    phases = @(
-      @{ open = 8;  quiz = 0; wrong = 0; wrongDone = 0; daysAgo = 1 },
-      @{ open = 10; quiz = 0; wrong = 0; wrongDone = 0; daysAgo = 0 }
-    )
-  }
+$files = @(
+  Get-ChildItem $artifactsDir -File -Filter "*.json" |
+  Where-Object { $_.Name -match "^coach\.day31\.(blank|comeback|steady|wrongheavy|recovery|anomaly)\.user\d+\.\d{8}-\d{9}\.json$" }
 )
 
-foreach($s in $scenarios){
+$rows = @()
 
-  $uid   = [long]$s.userId
-  $tag   = [string]$s.tag
-  $title = [string]$s.title
+foreach($uid in $userIds){
+  if(-not $tagMap.ContainsKey([long]$uid)){ continue }
 
-  Warn "=============================="
-  Warn "DAY30 ENGINE STABILITY $title userId=$uid"
-  Warn "=============================="
+  $tag = [string]$tagMap[[long]$uid]
+  $file = Pick-Latest $files $tag ([long]$uid)
+  if($null -eq $file){ continue }
 
-  if($ResetHistory){
-    Reset-History $uid
-  }
+  $obj = Load-JsonFile $file
 
-  if($mode -in @("seed","all")){
-    foreach($phase in $s.phases){
-      Seed-Phase `
-        $uid `
-        ([int]$phase.open) `
-        ([int]$phase.quiz) `
-        ([int]$phase.wrong) `
-        ([int]$phase.wrongDone) `
-        ([int]$phase.daysAgo)
-    }
-  }
+  $rows += [pscustomobject]@{
+    userId = [long]$uid
+    tag = $tag
 
-  if($mode -in @("close","all")){
-    $coach = Get-Coach $uid
-    $raw   = Get-RawSummary $uid
-    $ratio = Get-Ratios $raw
+    total_events = Safe-Get $obj "raw.total.total_events"
+    opens        = Safe-Get $obj "raw.total.opens"
+    quiz         = Safe-Get $obj "raw.total.quiz"
+    wrong        = Safe-Get $obj "raw.total.wrong"
+    wrong_done   = Safe-Get $obj "raw.total.wrong_done"
+    active_days  = Safe-Get $obj "raw.total.active_days"
+    first_day    = Safe-Get $obj "raw.total.first_day"
+    last_day     = Safe-Get $obj "raw.total.last_day"
 
-    Print-CoachSummary $uid $tag $coach $raw $ratio
+    today_events      = Safe-Get $obj "raw.today.total_events"
+    today_opens       = Safe-Get $obj "raw.today.opens"
+    today_quiz        = Safe-Get $obj "raw.today.quiz"
+    today_wrong       = Safe-Get $obj "raw.today.wrong"
+    today_wrong_done  = Safe-Get $obj "raw.today.wrong_done"
+    today_active_days = Safe-Get $obj "raw.today.active_days"
+    today_first_day   = Safe-Get $obj "raw.today.first_day"
+    today_last_day    = Safe-Get $obj "raw.today.last_day"
 
-    $payload = [pscustomobject]@{
-      day = 30
-      tag = $tag
-      userId = $uid
-      coach = $coach
-      raw = $raw
-      ratio = $ratio
-    }
+    coach_level  = Safe-Get $obj "coach.prediction.level"
+    coach_reason = Safe-Get $obj "coach.prediction.reasonCode"
+    coach_action = Safe-Get $obj "coach.nextAction"
 
-    Save-Coach $uid $tag $payload
+    coach_events3d   = Safe-Get $obj "coach.prediction.evidence.recentEventCount3d"
+    coach_daysSince  = Safe-Get $obj "coach.prediction.evidence.daysSinceLastEvent"
+    coach_streak     = Safe-Get $obj "coach.prediction.evidence.streakDays"
+
+    state_events    = Safe-Get $obj "coach.state.eventsCount"
+    state_quiz      = Safe-Get $obj "coach.state.quizSubmits"
+    state_wrong     = Safe-Get $obj "coach.state.wrongReviews"
+    state_wrongDone = Safe-Get-Any $obj @(
+      "coach.state.wrongReviewDoneCount",
+      "coach.state.wrongReviewDone",
+      "coach.state.wrongReviewsDone"
+    )
   }
 }
 
-Ok "DAY30 TUNED DONE"
+if($rows.Length -eq 0){
+  Write-Host ""
+  Write-Host "[FAIL] No valid day31 data found." -ForegroundColor Red
+  exit 1
+}
+
+Write-Host ""
+Write-Host "==== DAY31 PERSONA AUTO SIM SUMMARY ====" -ForegroundColor Cyan
+$rows | Select-Object `
+  userId, tag,
+  total_events, opens, quiz, wrong, wrong_done, active_days,
+  today_events, today_opens, today_quiz, today_wrong, today_wrong_done, today_active_days,
+  coach_events3d, coach_daysSince, coach_streak,
+  state_events, state_quiz, state_wrong, state_wrongDone,
+  coach_level, coach_reason, coach_action |
+  Format-Table -AutoSize
+
+Write-Host ""
+Write-Host "==== DAY31 DATE RANGE CHECK ====" -ForegroundColor Cyan
+$rows | Select-Object `
+  userId, tag, first_day, last_day, today_first_day, today_last_day |
+  Format-Table -AutoSize
+
+Write-Host ""
+Write-Host "==== DAY31 QUICK CHECK (state vs raw.today) ====" -ForegroundColor Yellow
+
+foreach($r in $rows){
+  $dbVsState = if(
+    (To-Int $r.today_events)     -ne (To-Int $r.state_events) -or
+    (To-Int $r.today_quiz)       -ne (To-Int $r.state_quiz) -or
+    (To-Int $r.today_wrong)      -ne (To-Int $r.state_wrong) -or
+    (To-Int $r.today_wrong_done) -ne (To-Int $r.state_wrongDone)
+  ){ "CHECK_NEEDED" } else { "OKISH" }
+
+  Write-Host ("user={0} tag={1} db_vs_state={2} level={3} reason={4} action={5}" -f `
+    $r.userId, $r.tag, $dbVsState, $r.coach_level, $r.coach_reason, $r.coach_action)
+}
+
+Write-Host ""
+Write-Host "==== DAY31 ASSERTIONS ====" -ForegroundColor Yellow
+
+$failed = $false
+$warned = $false
+
+$blank    = $rows | Where-Object { $_.tag -eq "blank" } | Select-Object -First 1
+$comeback = $rows | Where-Object { $_.tag -eq "comeback" } | Select-Object -First 1
+$steady   = $rows | Where-Object { $_.tag -eq "steady" } | Select-Object -First 1
+$wrongH   = $rows | Where-Object { $_.tag -eq "wrongheavy" } | Select-Object -First 1
+$recovery = $rows | Where-Object { $_.tag -eq "recovery" } | Select-Object -First 1
+$anomaly  = $rows | Where-Object { $_.tag -eq "anomaly" } | Select-Object -First 1
+
+foreach($r in $rows){
+  $daysSince = To-Int $r.coach_daysSince
+
+  switch ($r.tag) {
+    "blank" {
+      if((To-Int $r.today_events) -ne 0){
+        Write-Host "[FAIL] blank today_events should be 0 but was $($r.today_events)" -ForegroundColor Red
+        $failed = $true
+      } else {
+        Write-Host "[OK]   blank today_events = 0" -ForegroundColor Green
+      }
+
+      if($daysSince -ne 999){
+        Write-Host "[FAIL] blank coach_daysSince should be 999 but was $daysSince" -ForegroundColor Red
+        $failed = $true
+      } else {
+        Write-Host "[OK]   blank coach_daysSince = 999" -ForegroundColor Green
+      }
+    }
+
+    "anomaly" {
+      if((To-Int $r.today_quiz) -ne 0){
+        Write-Host "[FAIL] anomaly today_quiz should be 0 but was $($r.today_quiz)" -ForegroundColor Red
+        $failed = $true
+      } else {
+        Write-Host "[OK]   anomaly today_quiz = 0" -ForegroundColor Green
+      }
+
+      if((To-Int $r.today_opens) -lt 3){
+        Write-Host "[WARN] anomaly today_opens expected >= 3 but was $($r.today_opens)" -ForegroundColor Yellow
+        $warned = $true
+      } else {
+        Write-Host "[OK]   anomaly today_opens >= 3" -ForegroundColor Green
+      }
+    }
+
+    default {
+      if($daysSince -ne 0){
+        Write-Host "[FAIL] user=$($r.userId) tag=$($r.tag) coach_daysSince should be 0 but was $daysSince" -ForegroundColor Red
+        $failed = $true
+      } else {
+        Write-Host "[OK]   user=$($r.userId) tag=$($r.tag) coach_daysSince = 0" -ForegroundColor Green
+      }
+
+      if((To-Int $r.today_events) -ne (To-Int $r.state_events)){
+        Write-Host "[WARN] user=$($r.userId) tag=$($r.tag) today events != state events ($($r.today_events) != $($r.state_events))" -ForegroundColor Yellow
+        $warned = $true
+      }
+
+      if((To-Int $r.today_quiz) -ne (To-Int $r.state_quiz)){
+        Write-Host "[WARN] user=$($r.userId) tag=$($r.tag) today quiz != state quiz ($($r.today_quiz) != $($r.state_quiz))" -ForegroundColor Yellow
+        $warned = $true
+      }
+
+      if((To-Int $r.today_wrong) -ne (To-Int $r.state_wrong)){
+        Write-Host "[WARN] user=$($r.userId) tag=$($r.tag) today wrong != state wrong ($($r.today_wrong) != $($r.state_wrong))" -ForegroundColor Yellow
+        $warned = $true
+      }
+
+      if((To-Int $r.today_wrong_done) -ne (To-Int $r.state_wrongDone)){
+        Write-Host "[WARN] user=$($r.userId) tag=$($r.tag) today wrong_done != state wrongDone ($($r.today_wrong_done) != $($r.state_wrongDone))" -ForegroundColor Yellow
+        $warned = $true
+      }
+    }
+  }
+}
+
+if($blank -and $comeback){
+  if(Same-Decision $blank.coach_level $blank.coach_reason $blank.coach_action $comeback.coach_level $comeback.coach_reason $comeback.coach_action){
+    Write-Host "[WARN] blank and comeback are identical" -ForegroundColor Yellow
+    $warned = $true
+  } else {
+    Write-Host "[OK]   blank and comeback are separated" -ForegroundColor Green
+  }
+}
+
+if($comeback -and $steady){
+  if((To-Int $steady.coach_streak) -lt (To-Int $comeback.coach_streak)){
+    Write-Host "[FAIL] steady streak < comeback streak ($($steady.coach_streak) < $($comeback.coach_streak))" -ForegroundColor Red
+    $failed = $true
+  } else {
+    Write-Host "[OK]   steady streak >= comeback streak" -ForegroundColor Green
+  }
+
+  if((To-Int $steady.total_events) -le (To-Int $comeback.total_events)){
+    Write-Host "[WARN] steady total_events <= comeback total_events ($($steady.total_events) <= $($comeback.total_events))" -ForegroundColor Yellow
+    $warned = $true
+  } else {
+    Write-Host "[OK]   steady total_events > comeback total_events" -ForegroundColor Green
+  }
+}
+
+if($wrongH -and $recovery){
+  if((To-Int $wrongH.today_wrong) -le (To-Int $recovery.today_wrong)){
+    Write-Host "[WARN] wrongheavy today_wrong <= recovery today_wrong ($($wrongH.today_wrong) <= $($recovery.today_wrong))" -ForegroundColor Yellow
+    $warned = $true
+  } else {
+    Write-Host "[OK]   wrongheavy today_wrong > recovery today_wrong" -ForegroundColor Green
+  }
+
+  if((To-Int $recovery.today_wrong_done) -le (To-Int $wrongH.today_wrong_done)){
+    Write-Host "[WARN] recovery today_wrong_done <= wrongheavy today_wrong_done ($($recovery.today_wrong_done) <= $($wrongH.today_wrong_done))" -ForegroundColor Yellow
+    $warned = $true
+  } else {
+    Write-Host "[OK]   recovery today_wrong_done > wrongheavy today_wrong_done" -ForegroundColor Green
+  }
+
+  if(Same-Decision $wrongH.coach_level $wrongH.coach_reason $wrongH.coach_action $recovery.coach_level $recovery.coach_reason $recovery.coach_action){
+    Write-Host "[WARN] wrongheavy and recovery are identical" -ForegroundColor Yellow
+    $warned = $true
+  } else {
+    Write-Host "[OK]   wrongheavy and recovery are separated" -ForegroundColor Green
+  }
+}
+
+Write-Host ""
+
+if($failed){
+  Write-Host "[FAIL] verify-day31 completed with assertion failures." -ForegroundColor Red
+  exit 1
+}
+
+if($warned){
+  Write-Host "[WARN] verify-day31 completed with warnings." -ForegroundColor Yellow
+  exit 0
+}
+
+Write-Host "[OK] verify-day31 completed with no failures." -ForegroundColor Green
+exit 0

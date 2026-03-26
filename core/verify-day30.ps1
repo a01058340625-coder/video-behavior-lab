@@ -45,6 +45,7 @@ function Safe-Get-Any($obj,[string[]]$paths){
 function Pick-Latest([System.IO.FileInfo[]]$files,[string]$tag,[long]$uid){
   $matched = @(
     $files |
+    Where-Object { $_.Name -match "^coach\.day30\.(blank|comeback|steady|wrongheavy|recovery|anomaly)\.user\d+\.\d{8}-\d{9}\.json$" } |
     Where-Object { $_.Name -match ("^coach\.day30\.{0}\.user{1}\.\d{{8}}-\d{{9}}\.json$" -f [regex]::Escape($tag), $uid) } |
     Sort-Object LastWriteTime -Descending
   )
@@ -96,19 +97,33 @@ foreach($uid in $userIds){
     userId = [long]$uid
     tag = $tag
 
-    total_events = Safe-Get $obj "raw.total_events"
-    opens        = Safe-Get $obj "raw.opens"
-    quiz         = Safe-Get $obj "raw.quiz"
-    wrong        = Safe-Get $obj "raw.wrong"
-    wrong_done   = Safe-Get $obj "raw.wrong_done"
-    active_days  = Safe-Get $obj "raw.active_days"
-    first_day    = Safe-Get $obj "raw.first_day"
-    last_day     = Safe-Get $obj "raw.last_day"
+    total_events = Safe-Get $obj "raw.total.total_events"
+    opens        = Safe-Get $obj "raw.total.opens"
+    quiz         = Safe-Get $obj "raw.total.quiz"
+    wrong        = Safe-Get $obj "raw.total.wrong"
+    wrong_done   = Safe-Get $obj "raw.total.wrong_done"
+    active_days  = Safe-Get $obj "raw.total.active_days"
+    first_day    = Safe-Get $obj "raw.total.first_day"
+    last_day     = Safe-Get $obj "raw.total.last_day"
 
-    open_ratio   = Safe-Get $obj "ratio.open_ratio"
-    quiz_ratio   = Safe-Get $obj "ratio.quiz_ratio"
-    wrong_ratio  = Safe-Get $obj "ratio.wrong_ratio"
-    done_ratio   = Safe-Get $obj "ratio.done_ratio"
+    today_events     = Safe-Get $obj "raw.today.total_events"
+    today_opens      = Safe-Get $obj "raw.today.opens"
+    today_quiz       = Safe-Get $obj "raw.today.quiz"
+    today_wrong      = Safe-Get $obj "raw.today.wrong"
+    today_wrong_done = Safe-Get $obj "raw.today.wrong_done"
+    today_active_days = Safe-Get $obj "raw.today.active_days"
+    today_first_day   = Safe-Get $obj "raw.today.first_day"
+    today_last_day    = Safe-Get $obj "raw.today.last_day"
+
+    open_ratio   = Safe-Get $obj "ratio.total.open_ratio"
+    quiz_ratio   = Safe-Get $obj "ratio.total.quiz_ratio"
+    wrong_ratio  = Safe-Get $obj "ratio.total.wrong_ratio"
+    done_ratio   = Safe-Get $obj "ratio.total.done_ratio"
+
+    today_open_ratio  = Safe-Get $obj "ratio.today.open_ratio"
+    today_quiz_ratio  = Safe-Get $obj "ratio.today.quiz_ratio"
+    today_wrong_ratio = Safe-Get $obj "ratio.today.wrong_ratio"
+    today_done_ratio  = Safe-Get $obj "ratio.today.done_ratio"
 
     coach_level  = Safe-Get $obj "coach.prediction.level"
     coach_reason = Safe-Get $obj "coach.prediction.reasonCode"
@@ -117,15 +132,16 @@ foreach($uid in $userIds){
     coach_events3d  = Safe-Get $obj "coach.prediction.evidence.recentEventCount3d"
     coach_daysSince = Safe-Get $obj "coach.prediction.evidence.daysSinceLastEvent"
     coach_streak    = Safe-Get $obj "coach.prediction.evidence.streakDays"
+    coach_studiedToday = Safe-Get $obj "coach.prediction.evidence.studiedToday"
 
     state_events    = Safe-Get $obj "coach.state.eventsCount"
     state_quiz      = Safe-Get $obj "coach.state.quizSubmits"
     state_wrong     = Safe-Get $obj "coach.state.wrongReviews"
     state_wrongDone = Safe-Get-Any $obj @(
-  "coach.state.wrongReviewDoneCount",
-  "coach.state.wrongReviewDone",
-  "coach.state.wrongReviewsDone"
-)
+      "coach.state.wrongReviewDoneCount",
+      "coach.state.wrongReviewDone",
+      "coach.state.wrongReviewsDone"
+    )
   }
 }
 
@@ -140,7 +156,7 @@ Write-Host "==== DAY30 ENGINE STABILITY SUMMARY ====" -ForegroundColor Cyan
 $rows | Select-Object `
   userId, tag,
   total_events, opens, quiz, wrong, wrong_done, active_days,
-  open_ratio, quiz_ratio, wrong_ratio, done_ratio,
+  today_events, today_opens, today_quiz, today_wrong, today_wrong_done, today_active_days,
   coach_events3d, coach_daysSince, coach_streak,
   state_events, state_quiz, state_wrong, state_wrongDone,
   coach_level, coach_reason, coach_action |
@@ -150,18 +166,20 @@ Write-Host ""
 Write-Host "==== DAY30 DATE RANGE CHECK ====" -ForegroundColor Cyan
 $rows | Select-Object `
   userId, tag,
-  first_day, last_day |
+  first_day, last_day,
+  today_first_day, today_last_day |
   Format-Table -AutoSize
 
 Write-Host ""
-Write-Host "==== DAY30 QUICK CHECK ====" -ForegroundColor Yellow
+Write-Host "==== DAY30 QUICK CHECK (state vs raw.today) ====" -ForegroundColor Yellow
 
 foreach($r in $rows){
   $dbVsState = if(
-  (To-Int $r.quiz) -ne (To-Int $r.state_quiz) -or
-  (To-Int $r.wrong) -ne (To-Int $r.state_wrong) -or
-  (To-Int $r.wrong_done) -ne (To-Int $r.state_wrongDone)
-){ "CHECK_NEEDED" } else { "OKISH" }
+    (To-Int $r.today_events)     -ne (To-Int $r.state_events) -or
+    (To-Int $r.today_quiz)       -ne (To-Int $r.state_quiz) -or
+    (To-Int $r.today_wrong)      -ne (To-Int $r.state_wrong) -or
+    (To-Int $r.today_wrong_done) -ne (To-Int $r.state_wrongDone)
+  ){ "CHECK_NEEDED" } else { "OKISH" }
 
   Write-Host ("user={0} tag={1} db_vs_state={2} level={3} action={4}" -f `
     $r.userId, $r.tag, $dbVsState, $r.coach_level, $r.coach_action)
@@ -183,36 +201,82 @@ $anomaly  = $rows | Where-Object { $_.tag -eq "anomaly" } | Select-Object -First
 foreach($r in $rows){
   $daysSince = To-Int $r.coach_daysSince
 
-  if($r.tag -eq "blank"){
-    if((To-Int $r.total_events) -ne 0){
-      Write-Host "[FAIL] blank total_events should be 0 but was $($r.total_events)" -ForegroundColor Red
-      $failed = $true
-    } else {
-      Write-Host "[OK]   blank total_events = 0" -ForegroundColor Green
+  switch ($r.tag) {
+    "blank" {
+      if((To-Int $r.today_events) -ne 0){
+        Write-Host "[FAIL] blank today_events should be 0 but was $($r.today_events)" -ForegroundColor Red
+        $failed = $true
+      } else {
+        Write-Host "[OK]   blank today_events = 0" -ForegroundColor Green
+      }
+
+      if($daysSince -ne 999){
+        Write-Host "[FAIL] blank coach_daysSince should be 999 but was $daysSince" -ForegroundColor Red
+        $failed = $true
+      } else {
+        Write-Host "[OK]   blank coach_daysSince = 999" -ForegroundColor Green
+      }
+    }
+
+    "anomaly" {
+      if((To-Int $r.today_events) -ne 0){
+        Write-Host "[FAIL] anomaly today_events should be 0 but was $($r.today_events)" -ForegroundColor Red
+        $failed = $true
+      } else {
+        Write-Host "[OK]   anomaly today_events = 0" -ForegroundColor Green
+      }
+
+      if($daysSince -ne 999){
+        Write-Host "[FAIL] anomaly coach_daysSince should be 999 but was $daysSince" -ForegroundColor Red
+        $failed = $true
+      } else {
+        Write-Host "[OK]   anomaly coach_daysSince = 999" -ForegroundColor Green
+      }
+
+      if((To-Double $r.today_open_ratio) -ne 0){
+        Write-Host "[WARN] anomaly today_open_ratio expected 0 but was $($r.today_open_ratio)" -ForegroundColor Yellow
+        $warned = $true
+      } else {
+        Write-Host "[OK]   anomaly today_open_ratio = 0" -ForegroundColor Green
+      }
+
+      if((To-Int $r.today_quiz) -ne 0){
+        Write-Host "[FAIL] anomaly today_quiz should be 0 but was $($r.today_quiz)" -ForegroundColor Red
+        $failed = $true
+      } else {
+        Write-Host "[OK]   anomaly today_quiz = 0" -ForegroundColor Green
+      }
+    }
+
+    default {
+      if($daysSince -ne 0){
+        Write-Host "[FAIL] user=$($r.userId) tag=$($r.tag) coach_daysSince should be 0 but was $daysSince" -ForegroundColor Red
+        $failed = $true
+      } else {
+        Write-Host "[OK]   user=$($r.userId) tag=$($r.tag) coach_daysSince = 0" -ForegroundColor Green
+      }
+
+      if((To-Int $r.today_events) -ne (To-Int $r.state_events)){
+        Write-Host "[WARN] user=$($r.userId) tag=$($r.tag) today events != state events ($($r.today_events) != $($r.state_events))" -ForegroundColor Yellow
+        $warned = $true
+      }
+
+      if((To-Int $r.today_quiz) -ne (To-Int $r.state_quiz)){
+        Write-Host "[WARN] user=$($r.userId) tag=$($r.tag) today quiz != state quiz ($($r.today_quiz) != $($r.state_quiz))" -ForegroundColor Yellow
+        $warned = $true
+      }
+
+      if((To-Int $r.today_wrong) -ne (To-Int $r.state_wrong)){
+        Write-Host "[WARN] user=$($r.userId) tag=$($r.tag) today wrong != state wrong ($($r.today_wrong) != $($r.state_wrong))" -ForegroundColor Yellow
+        $warned = $true
+      }
+
+      if((To-Int $r.today_wrong_done) -ne (To-Int $r.state_wrongDone)){
+        Write-Host "[WARN] user=$($r.userId) tag=$($r.tag) today wrong_done != state wrongDone ($($r.today_wrong_done) != $($r.state_wrongDone))" -ForegroundColor Yellow
+        $warned = $true
+      }
     }
   }
-  else {
-    if($daysSince -ne 0){
-      Write-Host "[FAIL] user=$($r.userId) tag=$($r.tag) coach_daysSince should be 0 but was $daysSince" -ForegroundColor Red
-      $failed = $true
-    } else {
-      Write-Host "[OK]   user=$($r.userId) tag=$($r.tag) coach_daysSince = 0" -ForegroundColor Green
-    }
-  }
-
-  if((To-Int $r.quiz) -ne (To-Int $r.state_quiz)){
-    Write-Host "[WARN] user=$($r.userId) tag=$($r.tag) db quiz != state quiz ($($r.quiz) != $($r.state_quiz))" -ForegroundColor Yellow
-    $warned = $true
-  }
-
-  if((To-Int $r.wrong) -ne (To-Int $r.state_wrong)){
-  Write-Host "[WARN] user=$($r.userId) tag=$($r.tag) db wrong != state wrong ($($r.wrong) != $($r.state_wrong))" -ForegroundColor Yellow
-  $warned = $true
-}
-
-if((To-Int $r.wrong_done) -ne (To-Int $r.state_wrongDone)){
-  Write-Host "[WARN] user=$($r.userId) tag=$($r.tag) db wrong_done != state wrongDone ($($r.wrong_done) != $($r.state_wrongDone))" -ForegroundColor Yellow
-  $warned = $true
 }
 
 if($blank -and $comeback){
@@ -232,20 +296,20 @@ if($comeback -and $steady){
     Write-Host "[OK]   steady streak >= comeback streak" -ForegroundColor Green
   }
 
-  if((To-Int $steady.quiz) -le (To-Int $comeback.quiz)){
-    Write-Host "[WARN] steady quiz <= comeback quiz ($($steady.quiz) <= $($comeback.quiz))" -ForegroundColor Yellow
+  if((To-Int $steady.today_quiz) -le (To-Int $comeback.today_quiz)){
+    Write-Host "[WARN] steady today_quiz <= comeback today_quiz ($($steady.today_quiz) <= $($comeback.today_quiz))" -ForegroundColor Yellow
     $warned = $true
   } else {
-    Write-Host "[OK]   steady quiz > comeback quiz" -ForegroundColor Green
+    Write-Host "[OK]   steady today_quiz > comeback today_quiz" -ForegroundColor Green
   }
 }
 
 if($wrongH -and $recovery){
-  if((To-Int $recovery.wrong_done) -le (To-Int $wrongH.wrong_done)){
-    Write-Host "[WARN] recovery wrong_done <= wrongheavy wrong_done ($($recovery.wrong_done) <= $($wrongH.wrong_done))" -ForegroundColor Yellow
+  if((To-Int $recovery.today_wrong_done) -le (To-Int $wrongH.today_wrong_done)){
+    Write-Host "[WARN] recovery today_wrong_done <= wrongheavy today_wrong_done ($($recovery.today_wrong_done) <= $($wrongH.today_wrong_done))" -ForegroundColor Yellow
     $warned = $true
   } else {
-    Write-Host "[OK]   recovery wrong_done > wrongheavy wrong_done" -ForegroundColor Green
+    Write-Host "[OK]   recovery today_wrong_done > wrongheavy today_wrong_done" -ForegroundColor Green
   }
 
   if(Same-Decision $wrongH.coach_level $wrongH.coach_reason $wrongH.coach_action $recovery.coach_level $recovery.coach_reason $recovery.coach_action){
@@ -253,22 +317,6 @@ if($wrongH -and $recovery){
     $warned = $true
   } else {
     Write-Host "[OK]   wrongheavy and recovery are separated" -ForegroundColor Green
-  }
-}
-
-if($anomaly){
-  if((To-Double $anomaly.open_ratio) -lt 0.80){
-    Write-Host "[FAIL] anomaly open_ratio should be >= 0.80 but was $($anomaly.open_ratio)" -ForegroundColor Red
-    $failed = $true
-  } else {
-    Write-Host "[OK]   anomaly open_ratio >= 0.80" -ForegroundColor Green
-  }
-
-  if((To-Int $anomaly.quiz) -ne 0){
-    Write-Host "[FAIL] anomaly quiz should be 0 but was $($anomaly.quiz)" -ForegroundColor Red
-    $failed = $true
-  } else {
-    Write-Host "[OK]   anomaly quiz = 0" -ForegroundColor Green
   }
 }
 

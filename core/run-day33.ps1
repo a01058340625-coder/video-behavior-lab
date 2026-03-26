@@ -52,7 +52,7 @@ function Save-CoachArtifact {
   )
 
   $stamp = Get-Date -Format "yyyyMMdd-HHmmssfff"
-  $outFile = Join-Path $artifactsDir ("coach.day31.{0}.user{1}.{2}.json" -f $tag, $userId, $stamp)
+  $outFile = Join-Path $artifactsDir ("coach.day33.{0}.user{1}.{2}.json" -f $tag, $userId, $stamp)
 
   New-Item -ItemType Directory -Force -Path $artifactsDir | Out-Null
 
@@ -63,7 +63,6 @@ function Save-CoachArtifact {
   if (-not (Test-Path $loginReq)) {
     $loginReq = Join-Path $PSScriptRoot "..\samples\http-auth-login.fresh.req.json"
   }
-
   if (-not (Test-Path $loginReq)) {
     throw "로그인 샘플 파일을 찾을 수 없습니다."
   }
@@ -72,13 +71,12 @@ function Save-CoachArtifact {
   $loginBody = $rawLogin -replace '"email"\s*:\s*"[^"]+"', ('"email":"u{0}@goosage.test"' -f $user.loginUserNo)
   $loginBody = $loginBody -replace '"password"\s*:\s*"[^"]+"', '"password":"1234"'
 
-  $loginResp = curl.exe -s -c $cookie -b $cookie `
+  $null = curl.exe -s -c $cookie -b $cookie `
     -H "Content-Type: application/json" `
     -X POST "$base/auth/login" `
     --data-raw $loginBody
 
   $coachResp = curl.exe -s -c $cookie -b $cookie "$base/study/coach"
-
   $obj = $coachResp | ConvertFrom-Json
 
   $rawTotal = docker exec $mysqlContainer mysql -N -B -uroot -proot123 $dbName -e @"
@@ -127,22 +125,8 @@ where user_id = $userId
   $totalMap = Parse-Row (($rawTotal | Select-Object -First 1).Trim())
   $todayMap = Parse-Row (($rawToday | Select-Object -First 1).Trim())
 
-  $ratioTotal = [ordered]@{
-    open_ratio  = if($totalMap.total_events -gt 0){ [math]::Round($totalMap.opens / $totalMap.total_events, 2) } else { 0 }
-    quiz_ratio  = if($totalMap.total_events -gt 0){ [math]::Round($totalMap.quiz / $totalMap.total_events, 2) } else { 0 }
-    wrong_ratio = if($totalMap.total_events -gt 0){ [math]::Round($totalMap.wrong / $totalMap.total_events, 2) } else { 0 }
-    done_ratio  = if($totalMap.total_events -gt 0){ [math]::Round($totalMap.wrong_done / $totalMap.total_events, 2) } else { 0 }
-  }
-
-  $ratioToday = [ordered]@{
-    open_ratio  = if($todayMap.total_events -gt 0){ [math]::Round($todayMap.opens / $todayMap.total_events, 2) } else { 0 }
-    quiz_ratio  = if($todayMap.total_events -gt 0){ [math]::Round($todayMap.quiz / $todayMap.total_events, 2) } else { 0 }
-    wrong_ratio = if($todayMap.total_events -gt 0){ [math]::Round($todayMap.wrong / $todayMap.total_events, 2) } else { 0 }
-    done_ratio  = if($todayMap.total_events -gt 0){ [math]::Round($todayMap.wrong_done / $todayMap.total_events, 2) } else { 0 }
-  }
-
   $artifact = [ordered]@{
-    day = 31
+    day = 33
     tag = $tag
     userId = $userId
     generatedAt = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
@@ -151,14 +135,9 @@ where user_id = $userId
       total = $totalMap
       today = $todayMap
     }
-    ratio = [ordered]@{
-      total = $ratioTotal
-      today = $ratioToday
-    }
   }
 
   ($artifact | ConvertTo-Json -Depth 10) | Set-Content -Encoding utf8 $outFile
-
   Write-Host ("[OK]  saved => {0}" -f $outFile) -ForegroundColor Green
 }
 
@@ -168,41 +147,48 @@ function Seed-Blank($user) {
 
 function Seed-Comeback($user) {
   Write-Host "[SCENARIO] comeback user=$($user.targetUserId)" -ForegroundColor Yellow
-  Invoke-UserScenario -user $user -justOpen 1 -quiz 0 -wrong 0 -wrongDone 0 -daysAgo 4 -base $base -tag "day31"
-  Invoke-UserScenario -user $user -justOpen 1 -quiz 0 -wrong 0 -wrongDone 0 -daysAgo 3 -base $base -tag "day31"
-  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 0 -wrongDone 0 -daysAgo 0 -base $base -tag "day31"
+  Invoke-UserScenario -user $user -justOpen 1 -quiz 0 -wrong 0 -wrongDone 0 -daysAgo 6 -base $base -tag "day33"
+  Invoke-UserScenario -user $user -justOpen 1 -quiz 0 -wrong 0 -wrongDone 0 -daysAgo 5 -base $base -tag "day33"
+  Invoke-UserScenario -user $user -justOpen 1 -quiz 0 -wrong 0 -wrongDone 0 -daysAgo 4 -base $base -tag "day33"
+  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 0 -wrongDone 0 -daysAgo 0 -base $base -tag "day33"
 }
 
 function Seed-Steady($user) {
   Write-Host "[SCENARIO] steady user=$($user.targetUserId)" -ForegroundColor Yellow
-  Invoke-UserScenario -user $user -justOpen 1 -quiz 2 -wrong 0 -wrongDone 0 -daysAgo 4 -base $base -tag "day31"
-  Invoke-UserScenario -user $user -justOpen 1 -quiz 2 -wrong 0 -wrongDone 0 -daysAgo 3 -base $base -tag "day31"
-  Invoke-UserScenario -user $user -justOpen 1 -quiz 2 -wrong 0 -wrongDone 0 -daysAgo 2 -base $base -tag "day31"
-  Invoke-UserScenario -user $user -justOpen 1 -quiz 2 -wrong 0 -wrongDone 0 -daysAgo 1 -base $base -tag "day31"
-  Invoke-UserScenario -user $user -justOpen 1 -quiz 3 -wrong 0 -wrongDone 0 -daysAgo 0 -base $base -tag "day31"
+  6..0 | ForEach-Object {
+    $d = $_
+    $quiz = if ($d -eq 0) { 3 } else { 2 }
+    Invoke-UserScenario -user $user -justOpen 1 -quiz $quiz -wrong 0 -wrongDone 0 -daysAgo $d -base $base -tag "day33"
+  }
 }
 
 function Seed-WrongHeavy($user) {
   Write-Host "[SCENARIO] wrongheavy user=$($user.targetUserId)" -ForegroundColor Yellow
-  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 2 -wrongDone 0 -daysAgo 2 -base $base -tag "day31"
-  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 2 -wrongDone 0 -daysAgo 1 -base $base -tag "day31"
-  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 5 -wrongDone 1 -daysAgo 0 -base $base -tag "day31"
+  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 2 -wrongDone 0 -daysAgo 4 -base $base -tag "day33"
+  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 3 -wrongDone 0 -daysAgo 3 -base $base -tag "day33"
+  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 3 -wrongDone 0 -daysAgo 2 -base $base -tag "day33"
+  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 4 -wrongDone 0 -daysAgo 1 -base $base -tag "day33"
+  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 5 -wrongDone 1 -daysAgo 0 -base $base -tag "day33"
 }
 
 function Seed-Recovery($user) {
   Write-Host "[SCENARIO] recovery user=$($user.targetUserId)" -ForegroundColor Yellow
-  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 2 -wrongDone 0 -daysAgo 2 -base $base -tag "day31"
-  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 1 -wrongDone 2 -daysAgo 1 -base $base -tag "day31"
-  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 1 -wrongDone 4 -daysAgo 0 -base $base -tag "day31"
+  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 3 -wrongDone 0 -daysAgo 4 -base $base -tag "day33"
+  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 2 -wrongDone 1 -daysAgo 3 -base $base -tag "day33"
+  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 2 -wrongDone 2 -daysAgo 2 -base $base -tag "day33"
+  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 1 -wrongDone 3 -daysAgo 1 -base $base -tag "day33"
+  Invoke-UserScenario -user $user -justOpen 1 -quiz 1 -wrong 1 -wrongDone 4 -daysAgo 0 -base $base -tag "day33"
 }
 
 function Seed-Anomaly($user) {
   Write-Host "[SCENARIO] anomaly user=$($user.targetUserId)" -ForegroundColor Yellow
-  Invoke-UserScenario -user $user -justOpen 4 -quiz 0 -wrong 0 -wrongDone 0 -daysAgo 0 -base $base -tag "day31"
+  Invoke-UserScenario -user $user -justOpen 6 -quiz 0 -wrong 0 -wrongDone 0 -daysAgo 2 -base $base -tag "day33"
+  Invoke-UserScenario -user $user -justOpen 7 -quiz 0 -wrong 0 -wrongDone 0 -daysAgo 1 -base $base -tag "day33"
+  Invoke-UserScenario -user $user -justOpen 8 -quiz 0 -wrong 0 -wrongDone 0 -daysAgo 0 -base $base -tag "day33"
 }
 
 if($mode -in @("seed","all")){
-  Write-Banner "DAY31 PERSONA AUTO SIMULATION"
+  Write-Banner "DAY33 LONG-TERM PATTERN EXPERIMENT"
 
   Reset-Users -userIds ($scenarioMap.Values | ForEach-Object { [long]$_ })
 
@@ -217,7 +203,7 @@ if($mode -in @("seed","all")){
 }
 
 if($mode -in @("verify","all")){
-  Write-Banner "DAY31 COACH ARTIFACT SAVE"
+  Write-Banner "DAY33 COACH ARTIFACT SAVE"
 
   foreach($tag in $scenarioMap.Keys){
     $uid = [long]$scenarioMap[$tag]
@@ -225,5 +211,5 @@ if($mode -in @("verify","all")){
     Save-CoachArtifact -tag $tag -userId $uid -user $user
   }
 
-  Write-Banner "DAY31 DONE"
+  Write-Banner "DAY33 DONE"
 }

@@ -5,12 +5,8 @@ param(
   [string]$base = "http://127.0.0.1:8083",
   [string]$internalKey = "goosage-dev",
 
-  [long]$blankUser = 5,
-  [long]$comebackUser = 9,
-  [long]$steadyUser = 10,
   [long]$wrongHeavyUser = 12,
   [long]$recoveryUser = 13,
-  [long]$anomalyUser = 14,
 
   [switch]$ResetHistory = $true,
 
@@ -45,7 +41,7 @@ function Curl-Text([string]$url,[hashtable]$headers=@{}){
 }
 
 function Curl-PostJson([string]$url,[string]$jsonBody,[hashtable]$headers=@{}){
-  $tmp = Join-Path $env:TEMP ("req.day30.{0}.{1}.json" -f $PID,(Get-Random))
+  $tmp = Join-Path $env:TEMP ("req.day30lite.{0}.{1}.json" -f $PID,(Get-Random))
   Write-Utf8NoBom $tmp $jsonBody
 
   try {
@@ -61,16 +57,16 @@ function Curl-PostJson([string]$url,[string]$jsonBody,[hashtable]$headers=@{}){
 }
 
 function Db([string]$sql){
-  $tmp = Join-Path $env:TEMP ("day30_sql_{0}_{1}.sql" -f $PID,(Get-Random))
+  $tmp = Join-Path $env:TEMP ("day30lite_sql_{0}_{1}.sql" -f $PID,(Get-Random))
   Write-Utf8NoBom $tmp $sql
 
   try {
-    docker cp $tmp "${mysqlContainer}:/tmp/day30.sql" | Out-Null
-    docker exec $mysqlContainer sh -lc "mysql -N -u$dbUser -p$dbPass $dbName < /tmp/day30.sql"
+    docker cp $tmp "${mysqlContainer}:/tmp/day30lite.sql" | Out-Null
+    docker exec $mysqlContainer sh -lc "mysql -N -u$dbUser -p$dbPass $dbName < /tmp/day30lite.sql"
   }
   finally {
     Remove-Item $tmp -Force -ErrorAction SilentlyContinue
-    docker exec $mysqlContainer sh -lc "rm -f /tmp/day30.sql" | Out-Null
+    docker exec $mysqlContainer sh -lc "rm -f /tmp/day30lite.sql" | Out-Null
   }
 }
 
@@ -151,22 +147,8 @@ function Parse-RawCols($raw){
   }
 }
 
-function Get-RawSummary([long]$uid){
-  $rawTotal = Db @"
-SELECT
-  COUNT(*) AS total_events,
-  COALESCE(SUM(type='JUST_OPEN'),0) AS opens,
-  COALESCE(SUM(type='QUIZ_SUBMIT'),0) AS quiz,
-  COALESCE(SUM(type='REVIEW_WRONG'),0) AS wrongs,
-  COALESCE(SUM(type='WRONG_REVIEW_DONE'),0) AS wrong_done,
-  COUNT(DISTINCT DATE(created_at)) AS active_days,
-  MIN(DATE(created_at)) AS first_day,
-  MAX(DATE(created_at)) AS last_day
-FROM study_events
-WHERE user_id = $uid;
-"@
-
-  $rawToday = Db @"
+function Get-RawToday([long]$uid){
+  $raw = Db @"
 SELECT
   COUNT(*) AS total_events,
   COALESCE(SUM(type='JUST_OPEN'),0) AS opens,
@@ -181,40 +163,7 @@ WHERE user_id = $uid
   AND DATE(created_at) = CURDATE();
 "@
 
-  return [pscustomobject]@{
-    total = Parse-RawCols $rawTotal
-    today = Parse-RawCols $rawToday
-  }
-}
-
-function New-RatioObject([object]$raw){
-  $total = [double]([Math]::Max(1, $raw.total_events))
-  return [pscustomobject]@{
-    open_ratio  = [math]::Round(($raw.opens / $total), 2)
-    quiz_ratio  = [math]::Round(($raw.quiz / $total), 2)
-    wrong_ratio = [math]::Round(($raw.wrong / $total), 2)
-    done_ratio  = [math]::Round(($raw.wrong_done / $total), 2)
-  }
-}
-
-function Get-Ratios([object]$raw){
-  return [pscustomobject]@{
-    total = New-RatioObject $raw.total
-    today = New-RatioObject $raw.today
-  }
-}
-
-function Save-Coach([long]$uid,[string]$tag,[object]$obj){
-  $ts  = (Get-Date).ToString("yyyyMMdd-HHmmssfff")
-  $dir = Join-Path (Join-Path (Split-Path $PSScriptRoot -Parent) "core") "artifacts"
-
-  if(-not (Test-Path $dir)){
-    New-Item -ItemType Directory -Path $dir | Out-Null
-  }
-
-  $file = Join-Path $dir ("coach.day30.{0}.user{1}.{2}.json" -f $tag,$uid,$ts)
-  ($obj | ConvertTo-Json -Depth 20) | Out-File $file -Encoding utf8
-  Ok "saved => $file"
+  return Parse-RawCols $raw
 }
 
 function Get-PropValue($obj,[string]$name,$default=$null){
@@ -225,10 +174,49 @@ function Get-PropValue($obj,[string]$name,$default=$null){
   return $p.Value
 }
 
-function Print-CoachSummary([long]$uid,[string]$tag,[object]$coach,[object]$raw,[object]$ratio){
+function Save-Result([long]$uid,[string]$tag,[object]$obj){
+  $ts  = (Get-Date).ToString("yyyyMMdd-HHmmssfff")
+  $dir = Join-Path $PSScriptRoot "artifacts"
+
+  if(-not (Test-Path $dir)){
+    New-Item -ItemType Directory -Path $dir | Out-Null
+  }
+
+  $file = Join-Path $dir ("coach.day30lite.{0}.user{1}.{2}.json" -f $tag,$uid,$ts)
+  ($obj | ConvertTo-Json -Depth 20) | Out-File $file -Encoding utf8
+  Ok "saved => $file"
+}
+
+function Compare-StateAndToday([object]$coach,[object]$rawToday){
+  $s = Get-PropValue $coach "state" $null
+
+  $eventsCnt  = Get-PropValue $s "eventsCount" 0
+  $quizCnt    = Get-PropValue $s "quizSubmits" 0
+  $wrongCnt   = Get-PropValue $s "wrongReviews" 0
+  $wrongDone  = Get-PropValue $s "wrongReviewDoneCount" 0
+
+  $match =
+    ($eventsCnt -eq $rawToday.total_events) -and
+    ($quizCnt   -eq $rawToday.quiz) -and
+    ($wrongCnt  -eq $rawToday.wrong) -and
+    ($wrongDone -eq $rawToday.wrong_done)
+
+  return [pscustomobject]@{
+    state_events     = $eventsCnt
+    state_quiz       = $quizCnt
+    state_wrong      = $wrongCnt
+    state_wrongDone  = $wrongDone
+    raw_events       = $rawToday.total_events
+    raw_quiz         = $rawToday.quiz
+    raw_wrong        = $rawToday.wrong
+    raw_wrongDone    = $rawToday.wrong_done
+    is_match         = $match
+  }
+}
+
+function Print-Result([long]$uid,[string]$tag,[object]$coach,[object]$rawToday,[object]$cmp){
   $p = Get-PropValue $coach "prediction" $null
   $e = if($p){ Get-PropValue $p "evidence" $null } else { $null }
-  $s = Get-PropValue $coach "state" $null
 
   $level      = Get-PropValue $p "level" "-"
   $reasonCode = Get-PropValue $p "reasonCode" "-"
@@ -236,30 +224,26 @@ function Print-CoachSummary([long]$uid,[string]$tag,[object]$coach,[object]$raw,
   $daysSince  = Get-PropValue $e "daysSinceLastEvent" "-"
   $recent3d   = Get-PropValue $e "recentEventCount3d" "-"
   $streakDays = Get-PropValue $e "streakDays" "-"
-  $eventsCnt  = Get-PropValue $s "eventsCount" 0
-  $quizCnt    = Get-PropValue $s "quizSubmits" 0
-  # Print-CoachSummary 함수 내부 수정
-$wrongCnt   = Get-PropValue $s "wrongReviews" 0
-# state 대신 raw.today 데이터를 활용하도록 변경
-$wrongDone  = $raw.today.wrong_done
 
   Write-Host ""
   Write-Host "[SCENARIO] $tag user=$uid" -ForegroundColor Cyan
   Write-Host (" level={0} reason={1} action={2}" -f $level,$reasonCode,$nextAction)
   Write-Host (" evidence: daysSince={0} recent3d={1} streak={2}" -f $daysSince,$recent3d,$streakDays)
-  Write-Host (" state:      events={0} quiz={1} wrong={2} wrongDone={3}" -f $eventsCnt,$quizCnt,$wrongCnt,$wrongDone)
 
-  Write-Host (" raw_total:  total={0} opens={1} quiz={2} wrong={3} wrongDone={4} activeDays={5}" -f `
-    $raw.total.total_events,$raw.total.opens,$raw.total.quiz,$raw.total.wrong,$raw.total.wrong_done,$raw.total.active_days)
-  Write-Host (" ratio_total: open={0} quiz={1} wrong={2} done={3}" -f `
-    $ratio.total.open_ratio,$ratio.total.quiz_ratio,$ratio.total.wrong_ratio,$ratio.total.done_ratio)
-  Write-Host (" range_total: first={0} last={1}" -f $raw.total.first_day,$raw.total.last_day)
+  Write-Host (" state:     events={0} quiz={1} wrong={2} wrongDone={3}" -f `
+    $cmp.state_events,$cmp.state_quiz,$cmp.state_wrong,$cmp.state_wrongDone)
 
-  Write-Host (" raw_today:  total={0} opens={1} quiz={2} wrong={3} wrongDone={4} activeDays={5}" -f `
-    $raw.today.total_events,$raw.today.opens,$raw.today.quiz,$raw.today.wrong,$raw.today.wrong_done,$raw.today.active_days)
-  Write-Host (" ratio_today: open={0} quiz={1} wrong={2} done={3}" -f `
-    $ratio.today.open_ratio,$ratio.today.quiz_ratio,$ratio.today.wrong_ratio,$ratio.today.done_ratio)
-  Write-Host (" range_today: first={0} last={1}" -f $raw.today.first_day,$raw.today.last_day)
+  Write-Host (" raw_today: events={0} quiz={1} wrong={2} wrongDone={3}" -f `
+    $cmp.raw_events,$cmp.raw_quiz,$cmp.raw_wrong,$cmp.raw_wrongDone)
+
+  Write-Host (" today_row: first={0} last={1} activeDays={2}" -f `
+    $rawToday.first_day,$rawToday.last_day,$rawToday.active_days)
+
+  if($cmp.is_match){
+    Write-Host "[MATCH] state == raw_today" -ForegroundColor Green
+  } else {
+    Write-Host "[MISMATCH] state != raw_today" -ForegroundColor Red
+  }
 }
 
 function Seed-Phase(
@@ -293,31 +277,6 @@ function Seed-Phase(
 
 $scenarios = @(
   [pscustomobject]@{
-    userId = $blankUser
-    tag    = "blank"
-    title  = "BLANK"
-    phases = @()
-  },
-  [pscustomobject]@{
-    userId = $comebackUser
-    tag    = "comeback"
-    title  = "COMEBACK"
-    phases = @(
-      @{ open = 1; quiz = 0; wrong = 0; wrongDone = 0; daysAgo = 4 },
-      @{ open = 1; quiz = 1; wrong = 0; wrongDone = 0; daysAgo = 0 }
-    )
-  },
-  [pscustomobject]@{
-    userId = $steadyUser
-    tag    = "steady"
-    title  = "STEADY"
-    phases = @(
-      @{ open = 1; quiz = 1; wrong = 0; wrongDone = 0; daysAgo = 2 },
-      @{ open = 1; quiz = 2; wrong = 0; wrongDone = 0; daysAgo = 1 },
-      @{ open = 1; quiz = 3; wrong = 0; wrongDone = 0; daysAgo = 0 }
-    )
-  },
-  [pscustomobject]@{
     userId = $wrongHeavyUser
     tag    = "wrongheavy"
     title  = "WRONG_HEAVY"
@@ -334,15 +293,6 @@ $scenarios = @(
       @{ open = 1; quiz = 1; wrong = 3; wrongDone = 0; daysAgo = 1 },
       @{ open = 1; quiz = 1; wrong = 1; wrongDone = 4; daysAgo = 0 }
     )
-  },
-  [pscustomobject]@{
-    userId = $anomalyUser
-    tag    = "anomaly"
-    title  = "ANOMALY"
-    phases = @(
-      @{ open = 8;  quiz = 0; wrong = 0; wrongDone = 0; daysAgo = 1 },
-      @{ open = 10; quiz = 0; wrong = 0; wrongDone = 0; daysAgo = 0 }
-    )
   }
 )
 
@@ -353,7 +303,7 @@ foreach($s in $scenarios){
   $title = [string]$s.title
 
   Warn "=============================="
-  Warn "DAY30 ENGINE STABILITY $title userId=$uid"
+  Warn "DAY30 LITE $title userId=$uid"
   Warn "=============================="
 
   if($ResetHistory){
@@ -373,23 +323,24 @@ foreach($s in $scenarios){
   }
 
   if($mode -in @("close","all")){
-    $coach = Get-Coach $uid
-    $raw   = Get-RawSummary $uid
-    $ratio = Get-Ratios $raw
+    $coach    = Get-Coach $uid
+    $rawToday = Get-RawToday $uid
+    $cmp      = Compare-StateAndToday $coach $rawToday
 
-    Print-CoachSummary $uid $tag $coach $raw $ratio
+    Print-Result $uid $tag $coach $rawToday $cmp
 
     $payload = [pscustomobject]@{
       day = 30
+      mode = "lite"
       tag = $tag
       userId = $uid
       coach = $coach
-      raw = $raw
-      ratio = $ratio
+      rawToday = $rawToday
+      compare = $cmp
     }
 
-    Save-Coach $uid $tag $payload
+    Save-Result $uid $tag $payload
   }
 }
 
-Ok "DAY30 TUNED DONE"
+Ok "DAY30 LITE DONE"
