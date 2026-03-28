@@ -1,6 +1,6 @@
 param(
   [string]$artifactsDir = "C:\dev\loosegoose\goosage-scripts\core\artifacts",
-  [long[]]$userIds = @(5, 9, 10, 12, 13, 14)
+  [long[]]$userIds = @(5, 9, 10, 1, 13, 3)
 )
 
 chcp 65001 > $null
@@ -14,9 +14,9 @@ $tagMap = @{
   ([long]5)  = "blank"
   ([long]9)  = "comeback"
   ([long]10) = "steady"
-  ([long]12) = "wrongheavy"
+  ([long]1)  = "wrongheavy"
   ([long]13) = "recovery"
-  ([long]14) = "anomaly"
+  ([long]3)  = "anomaly"
 }
 
 function Safe-Get($obj,[string]$path){

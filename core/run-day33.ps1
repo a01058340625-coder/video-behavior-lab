@@ -2,7 +2,7 @@ param(
   [ValidateSet("seed","verify","all")]
   [string]$mode = "all",
 
-  [string]$base = "http://127.0.0.1:8084",
+  [string]$base = "http://127.0.0.1:8083",
   [string]$artifactsDir = "C:\dev\loosegoose\goosage-scripts\core\artifacts",
 
   [string]$mysqlContainer = "goosage-mysql",
@@ -22,9 +22,9 @@ $scenarioMap = [ordered]@{
   blank      = 5
   comeback   = 9
   steady     = 10
-  wrongheavy = 12
+  wrongheavy = 1
   recovery   = 13
-  anomaly    = 14
+  anomaly    = 3
 }
 
 function Get-UserByTargetId([long]$targetUserId) {
@@ -57,7 +57,9 @@ function Save-CoachArtifact {
   New-Item -ItemType Directory -Force -Path $artifactsDir | Out-Null
 
   $cookie = Join-Path $PSScriptRoot ("cookies\cookie.u{0}.txt" -f $user.loginUserNo)
-  if (Test-Path $cookie) { Remove-Item $cookie -Force }
+  if (Test-Path $cookie) {
+    Remove-Item $cookie -Force
+  }
 
   $loginReq = Join-Path $PSScriptRoot "..\samples\http-auth-login.req.json"
   if (-not (Test-Path $loginReq)) {
@@ -81,12 +83,12 @@ function Save-CoachArtifact {
 
   $rawTotal = docker exec $mysqlContainer mysql -N -B -uroot -proot123 $dbName -e @"
 select
-  count(*) as total_events,
-  sum(type='JUST_OPEN') as opens,
-  sum(type='QUIZ_SUBMIT') as quiz,
-  sum(type='REVIEW_WRONG') as wrong,
-  sum(type='WRONG_REVIEW_DONE') as wrong_done,
-  count(distinct date(created_at)) as active_days,
+  coalesce(count(*),0) as total_events,
+  coalesce(sum(type='JUST_OPEN'),0) as opens,
+  coalesce(sum(type='QUIZ_SUBMIT'),0) as quiz,
+  coalesce(sum(type='REVIEW_WRONG'),0) as wrong,
+  coalesce(sum(type='WRONG_REVIEW_DONE'),0) as wrong_done,
+  coalesce(count(distinct date(created_at)),0) as active_days,
   coalesce(date_format(min(created_at),'%Y-%m-%d'),'NULL') as first_day,
   coalesce(date_format(max(created_at),'%Y-%m-%d'),'NULL') as last_day
 from study_events
@@ -95,35 +97,67 @@ where user_id = $userId;
 
   $rawToday = docker exec $mysqlContainer mysql -N -B -uroot -proot123 $dbName -e @"
 select
-  count(*) as total_events,
-  sum(type='JUST_OPEN') as opens,
-  sum(type='QUIZ_SUBMIT') as quiz,
-  sum(type='REVIEW_WRONG') as wrong,
-  sum(type='WRONG_REVIEW_DONE') as wrong_done,
-  count(distinct date(created_at)) as active_days,
+  coalesce(count(*),0) as total_events,
+  coalesce(sum(type='JUST_OPEN'),0) as opens,
+  coalesce(sum(type='QUIZ_SUBMIT'),0) as quiz,
+  coalesce(sum(type='REVIEW_WRONG'),0) as wrong,
+  coalesce(sum(type='WRONG_REVIEW_DONE'),0) as wrong_done,
+  coalesce(count(distinct date(created_at)),0) as active_days,
   coalesce(date_format(min(created_at),'%Y-%m-%d'),'NULL') as first_day,
   coalesce(date_format(max(created_at),'%Y-%m-%d'),'NULL') as last_day
 from study_events
 where user_id = $userId
-  and date(created_at)=curdate();
+  and date(created_at) = curdate();
 "@
 
-  function Parse-Row($line){
+  function Parse-Row($line) {
     $p = $line -split "`t"
+
+    function Get-IntValue($arr, [int]$idx) {
+      if ($arr.Count -le $idx) { return 0 }
+
+      $v = $arr[$idx]
+      if ($null -eq $v) { return 0 }
+
+      $s = [string]$v
+      if ([string]::IsNullOrWhiteSpace($s)) { return 0 }
+      if ($s -eq "NULL") { return 0 }
+
+      return [int]$s
+    }
+
+    function Get-StrValue($arr, [int]$idx, [string]$defaultValue) {
+      if ($arr.Count -le $idx) { return $defaultValue }
+
+      $v = $arr[$idx]
+      if ($null -eq $v) { return $defaultValue }
+
+      $s = [string]$v
+      if ([string]::IsNullOrWhiteSpace($s)) { return $defaultValue }
+
+      return $s
+    }
+
     return [ordered]@{
-      total_events = [int]($p[0] ?? 0)
-      opens        = [int]($p[1] ?? 0)
-      quiz         = [int]($p[2] ?? 0)
-      wrong        = [int]($p[3] ?? 0)
-      wrong_done   = [int]($p[4] ?? 0)
-      active_days  = [int]($p[5] ?? 0)
-      first_day    = ($p[6] ?? "NULL")
-      last_day     = ($p[7] ?? "NULL")
+      total_events = Get-IntValue $p 0
+      opens        = Get-IntValue $p 1
+      quiz         = Get-IntValue $p 2
+      wrong        = Get-IntValue $p 3
+      wrong_done   = Get-IntValue $p 4
+      active_days  = Get-IntValue $p 5
+      first_day    = Get-StrValue $p 6 "NULL"
+      last_day     = Get-StrValue $p 7 "NULL"
     }
   }
 
-  $totalMap = Parse-Row (($rawTotal | Select-Object -First 1).Trim())
-  $todayMap = Parse-Row (($rawToday | Select-Object -First 1).Trim())
+  $rawTotalLine = ($rawTotal | Select-Object -First 1)
+  $rawTodayLine = ($rawToday | Select-Object -First 1)
+
+  if ($null -eq $rawTotalLine) { $rawTotalLine = "" }
+  if ($null -eq $rawTodayLine) { $rawTodayLine = "" }
+
+  $totalMap = Parse-Row ($rawTotalLine.ToString().Trim())
+  $todayMap = Parse-Row ($rawTodayLine.ToString().Trim())
 
   $artifact = [ordered]@{
     day = 33

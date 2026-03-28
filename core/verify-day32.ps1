@@ -59,8 +59,8 @@ $failed = $false
 foreach ($line in $rows) {
   $p = $line -split "`t"
   $uid = $p[0]
-  $wrong = [int]($p[1] ?? 0)
-  $done  = [int]($p[2] ?? 0)
+  $wrong = if ($p.Length -gt 1 -and $p[1]) { [int]$p[1] } else { 0 }
+$done  = if ($p.Length -gt 2 -and $p[2]) { [int]$p[2] } else { 0 }
 
   if ($done -gt $wrong) {
     Write-Host "[OK]   user=$uid recovery pattern" -ForegroundColor Green
