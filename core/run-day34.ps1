@@ -3,6 +3,7 @@ param(
   [string]$mode = "all",
 
   [string]$base = "http://127.0.0.1:8084",
+  [string]$internalKey = "goosage-dev",
   [string]$artifactsDir = "C:\dev\loosegoose\goosage-scripts\core\artifacts",
 
   [string]$mysqlContainer = "goosage-mysql",
@@ -21,10 +22,10 @@ $ErrorActionPreference = "Stop"
 $scenarioMap = [ordered]@{
   blank      = 5
   comeback   = 9
-  steady     = 10
-  wrongheavy = 12
-  recovery   = 13
-  anomaly    = 14
+  steady     = 6
+  wrongheavy = 1
+  recovery   = 10
+  anomaly    = 3
 }
 
 $expectedMap = [ordered]@{
@@ -54,17 +55,21 @@ $expectedMap = [ordered]@{
     action = "READ_SUMMARY"
   }
   anomaly = [ordered]@{
-    level  = "DANGER"
-    reason = "HABIT_COLLAPSE"
-    action = "READ_SUMMARY"
-  }
+  level  = "WARNING"
+  reason = "LOW_QUALITY_OPEN"
+  action = "RETRY_QUIZ"
+}
 }
 
 function Get-UserByTargetId([long]$targetUserId) {
-  $u = $Global:GooUsers | Where-Object { [long]$_.targetUserId -eq [long]$targetUserId } | Select-Object -First 1
+  $u = $Global:GooUsers |
+    Where-Object { [long]$_.targetUserId -eq [long]$targetUserId } |
+    Select-Object -First 1
+
   if ($null -eq $u) {
     throw "persona-map.ps1 에 targetUserId=$targetUserId 사용자가 없습니다."
   }
+
   return $u
 }
 
@@ -74,6 +79,66 @@ function Reset-Users([long[]]$userIds) {
 delete from study_events where user_id = $uid;
 delete from daily_learning where user_id = $uid;
 "@ | Out-Null
+  }
+}
+
+function Get-IntOrDefault {
+  param(
+    [Parameter(Mandatory=$true)]$arr,
+    [Parameter(Mandatory=$true)][int]$idx,
+    [int]$defaultValue = 0
+  )
+
+  if ($null -ne $arr -and $arr.Count -gt $idx) {
+    $v = $arr[$idx]
+    if ($null -ne $v) {
+      $s = "$v".Trim()
+      if ($s -ne "" -and $s.ToUpper() -ne "NULL") {
+        return [int]$s
+      }
+    }
+  }
+
+  return [int]$defaultValue
+}
+
+function Get-StrOrDefault {
+  param(
+    [Parameter(Mandatory=$true)]$arr,
+    [Parameter(Mandatory=$true)][int]$idx,
+    [string]$defaultValue = "NULL"
+  )
+
+  if ($null -ne $arr -and $arr.Count -gt $idx) {
+    $v = $arr[$idx]
+    if ($null -ne $v -and "$v".Trim() -ne "") {
+      return [string]$v
+    }
+  }
+
+  return [string]$defaultValue
+}
+
+function Parse-Row {
+  param(
+    [string]$line
+  )
+
+  if ([string]::IsNullOrWhiteSpace($line)) {
+    $p = @()
+  } else {
+    $p = $line -split "`t"
+  }
+
+  return [ordered]@{
+    total_events = Get-IntOrDefault -arr $p -idx 0 -defaultValue 0
+    opens        = Get-IntOrDefault -arr $p -idx 1 -defaultValue 0
+    quiz         = Get-IntOrDefault -arr $p -idx 2 -defaultValue 0
+    wrong        = Get-IntOrDefault -arr $p -idx 3 -defaultValue 0
+    wrong_done   = Get-IntOrDefault -arr $p -idx 4 -defaultValue 0
+    active_days  = Get-IntOrDefault -arr $p -idx 5 -defaultValue 0
+    first_day    = Get-StrOrDefault -arr $p -idx 6 -defaultValue "NULL"
+    last_day     = Get-StrOrDefault -arr $p -idx 7 -defaultValue "NULL"
   }
 }
 
@@ -89,36 +154,26 @@ function Save-CoachArtifact {
 
   New-Item -ItemType Directory -Force -Path $artifactsDir | Out-Null
 
-  $cookie = Join-Path $PSScriptRoot ("cookies\cookie.u{0}.txt" -f $user.loginUserNo)
-  if (Test-Path $cookie) { Remove-Item $cookie -Force }
+  $coachResp = curl.exe -s `
+    -H ("X-Internal-Key: {0}" -f $internalKey) `
+    "$base/internal/study/coach?userId=$userId"
 
-  $loginReq = Join-Path $PSScriptRoot "..\samples\http-auth-login.req.json"
-  if (-not (Test-Path $loginReq)) {
-    $loginReq = Join-Path $PSScriptRoot "..\samples\http-auth-login.fresh.req.json"
-  }
-  if (-not (Test-Path $loginReq)) {
-    throw "로그인 샘플 파일을 찾을 수 없습니다."
-  }
+  Write-Host "[DEBUG] coachResp =>" -ForegroundColor DarkGray
+  Write-Host $coachResp -ForegroundColor DarkGray
 
-  $rawLogin = Get-Content $loginReq -Raw -Encoding utf8
-  $loginBody = $rawLogin -replace '"email"\s*:\s*"[^"]+"', ('"email":"u{0}@goosage.test"' -f $user.loginUserNo)
-  $loginBody = $loginBody -replace '"password"\s*:\s*"[^"]+"', '"password":"1234"'
-
-  $null = curl.exe -s -c $cookie -b $cookie `
-    -H "Content-Type: application/json" `
-    -X POST "$base/auth/login" `
-    --data-raw $loginBody
-
-  $coachResp = curl.exe -s -c $cookie -b $cookie "$base/study/coach"
   $obj = $coachResp | ConvertFrom-Json
+
+  if ($null -eq $obj -or $null -eq $obj.prediction -or $null -eq $obj.nextAction) {
+    throw ("internal coach 응답 형식 이상 userId={0}" -f $userId)
+  }
 
   $rawTotal = docker exec $mysqlContainer mysql -N -B -uroot -proot123 $dbName -e @"
 select
   count(*) as total_events,
-  sum(type='JUST_OPEN') as opens,
-  sum(type='QUIZ_SUBMIT') as quiz,
-  sum(type='REVIEW_WRONG') as wrong,
-  sum(type='WRONG_REVIEW_DONE') as wrong_done,
+  coalesce(sum(type='JUST_OPEN'), 0) as opens,
+  coalesce(sum(type='QUIZ_SUBMIT'), 0) as quiz,
+  coalesce(sum(type='REVIEW_WRONG'), 0) as wrong,
+  coalesce(sum(type='WRONG_REVIEW_DONE'), 0) as wrong_done,
   count(distinct date(created_at)) as active_days,
   coalesce(date_format(min(created_at),'%Y-%m-%d'),'NULL') as first_day,
   coalesce(date_format(max(created_at),'%Y-%m-%d'),'NULL') as last_day
@@ -129,10 +184,10 @@ where user_id = $userId;
   $rawToday = docker exec $mysqlContainer mysql -N -B -uroot -proot123 $dbName -e @"
 select
   count(*) as total_events,
-  sum(type='JUST_OPEN') as opens,
-  sum(type='QUIZ_SUBMIT') as quiz,
-  sum(type='REVIEW_WRONG') as wrong,
-  sum(type='WRONG_REVIEW_DONE') as wrong_done,
+  coalesce(sum(type='JUST_OPEN'), 0) as opens,
+  coalesce(sum(type='QUIZ_SUBMIT'), 0) as quiz,
+  coalesce(sum(type='REVIEW_WRONG'), 0) as wrong,
+  coalesce(sum(type='WRONG_REVIEW_DONE'), 0) as wrong_done,
   count(distinct date(created_at)) as active_days,
   coalesce(date_format(min(created_at),'%Y-%m-%d'),'NULL') as first_day,
   coalesce(date_format(max(created_at),'%Y-%m-%d'),'NULL') as last_day
@@ -141,22 +196,14 @@ where user_id = $userId
   and date(created_at)=curdate();
 "@
 
-  function Parse-Row($line){
-    $p = $line -split "`t"
-    return [ordered]@{
-      total_events = [int]($p[0] ?? 0)
-      opens        = [int]($p[1] ?? 0)
-      quiz         = [int]($p[2] ?? 0)
-      wrong        = [int]($p[3] ?? 0)
-      wrong_done   = [int]($p[4] ?? 0)
-      active_days  = [int]($p[5] ?? 0)
-      first_day    = ($p[6] ?? "NULL")
-      last_day     = ($p[7] ?? "NULL")
-    }
-  }
+  $totalLine = ($rawTotal | Select-Object -First 1)
+  $todayLine = ($rawToday | Select-Object -First 1)
 
-  $totalMap = Parse-Row (($rawTotal | Select-Object -First 1).Trim())
-  $todayMap = Parse-Row (($rawToday | Select-Object -First 1).Trim())
+  if ($null -eq $totalLine) { $totalLine = "" }
+  if ($null -eq $todayLine) { $todayLine = "" }
+
+  $totalMap = Parse-Row -line ($totalLine.ToString().Trim())
+  $todayMap = Parse-Row -line ($todayLine.ToString().Trim())
 
   $artifact = [ordered]@{
     day = 34
@@ -164,7 +211,7 @@ where user_id = $userId
     userId = $userId
     generatedAt = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
     expected = $expectedMap[$tag]
-    coach = $obj.data
+    coach = $obj
     raw = [ordered]@{
       total = $totalMap
       today = $todayMap

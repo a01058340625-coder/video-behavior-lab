@@ -20,3 +20,4 @@ foreach ($user in $Global:GooUsers) {
 
 Show-TodayDbSummary
 Write-Banner "run-days20 DONE"
+

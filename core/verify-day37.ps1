@@ -1,6 +1,6 @@
 param(
   [string]$artifactsDir = "C:\dev\loosegoose\goosage-scripts\core\artifacts",
-  [long[]]$userIds = @(5, 9, 6, 1, 10, 3)
+  [long[]]$userIds = @(5, 9, 6, 1, 3, 10)
 )
 
 chcp 65001 > $null
@@ -10,13 +10,13 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$tagMap = @{
-  ([long]5)  = "blank"
-  ([long]9)  = "comeback"
-  ([long]6)  = "steady"
-  ([long]1)  = "wrongheavy"
-  ([long]10) = "recovery"
-  ([long]3)  = "anomaly"
+$tagMap = [ordered]@{
+  ([long]5)  = "collapse"
+  ([long]9)  = "restart"
+  ([long]6)  = "stable"
+  ([long]1)  = "builder"
+  ([long]3)  = "openonly"
+  ([long]10) = "recoverysafe"
 }
 
 function Safe-Get($obj,[string]$path){
@@ -35,8 +35,8 @@ function Safe-Get($obj,[string]$path){
 function Pick-Latest([System.IO.FileInfo[]]$files,[string]$tag,[long]$uid){
   $matched = @(
     $files |
-    Where-Object { $_.Name -match "^coach\.day34\.(blank|comeback|steady|wrongheavy|recovery|anomaly)\.user\d+\.\d{8}-\d{9}\.json$" } |
-    Where-Object { $_.Name -match ("^coach\.day34\.{0}\.user{1}\.\d{{8}}-\d{{9}}\.json$" -f [regex]::Escape($tag), $uid) } |
+    Where-Object { $_.Name -match "^coach\.day37\.(collapse|restart|stable|builder|openonly|recoverysafe)\.user\d+\.\d{8}-\d{9}\.json$" } |
+    Where-Object { $_.Name -match ("^coach\.day37\.{0}\.user{1}\.\d{{8}}-\d{{9}}\.json$" -f [regex]::Escape($tag), $uid) } |
     Sort-Object LastWriteTime -Descending
   )
   if($matched.Length -gt 0){ return $matched[0] }
@@ -54,13 +54,13 @@ function To-Int($v,[int]$default=0){
 
 $files = @(
   Get-ChildItem $artifactsDir -File -Filter "*.json" |
-  Where-Object { $_.Name -match "^coach\.day34\.(blank|comeback|steady|wrongheavy|recovery|anomaly)\.user\d+\.\d{8}-\d{9}\.json$" }
+  Where-Object { $_.Name -match "^coach\.day37\.(collapse|restart|stable|builder|openonly|recoverysafe)\.user\d+\.\d{8}-\d{9}\.json$" }
 )
 
 $rows = @()
 
 foreach($uid in $userIds){
-  if(-not $tagMap.ContainsKey([long]$uid)){ continue }
+  if(-not $tagMap.Contains([long]$uid)){ continue }
 
   $tag = [string]$tagMap[[long]$uid]
   $file = Pick-Latest $files $tag ([long]$uid)
@@ -113,12 +113,12 @@ foreach($uid in $userIds){
 
 if($rows.Length -eq 0){
   Write-Host ""
-  Write-Host "[FAIL] No valid day34 data found." -ForegroundColor Red
+  Write-Host "[FAIL] No valid day37 data found." -ForegroundColor Red
   exit 1
 }
 
 Write-Host ""
-Write-Host "==== DAY34 PREDICTION ACCURACY SUMMARY ====" -ForegroundColor Cyan
+Write-Host "==== DAY37 HABIT FORMATION ACCURACY SUMMARY ====" -ForegroundColor Cyan
 $rows | Select-Object `
   userId, tag,
   expected_level, actual_level, level_hit,
@@ -130,7 +130,7 @@ $rows | Select-Object `
   Format-Table -AutoSize
 
 Write-Host ""
-Write-Host "==== DAY34 ASSERTIONS ====" -ForegroundColor Yellow
+Write-Host "==== DAY37 ASSERTIONS ====" -ForegroundColor Yellow
 
 $failed = $false
 $warned = $false
@@ -169,14 +169,14 @@ if($avg -lt 2.5){
 Write-Host ""
 
 if($failed){
-  Write-Host "[FAIL] verify-day34 completed with assertion failures." -ForegroundColor Red
+  Write-Host "[FAIL] verify-day37 completed with assertion failures." -ForegroundColor Red
   exit 1
 }
 
 if($warned){
-  Write-Host "[WARN] verify-day34 completed with warnings." -ForegroundColor Yellow
+  Write-Host "[WARN] verify-day37 completed with warnings." -ForegroundColor Yellow
   exit 0
 }
 
-Write-Host "[OK] verify-day34 completed with no failures." -ForegroundColor Green
+Write-Host "[OK] verify-day37 completed with no failures." -ForegroundColor Green
 exit 0
