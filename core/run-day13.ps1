@@ -3,7 +3,7 @@ param(
   [ValidateSet("am","pm","close","all")]
   [string]$phase = "all",
 
-  [string]$base = "http://127.0.0.1:8083",
+  [string]$base = "http://127.0.0.1:8084",
   [string]$internalKey = "goosage-dev",
 
   # Day13: 유저별 시나리오 다양화 (기본 4명)
